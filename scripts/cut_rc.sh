@@ -123,6 +123,15 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 
 echo "==> Fetching refs from ${REMOTE}..."
+
+# Delete any local tags that might conflict with the fetch
+echo "==> Cleaning up potentially conflicting local tags..."
+if $DRY_RUN; then
+  echo "(dry-run) git tag -l 'v*' | xargs -r git tag -d"
+else
+  git tag -l 'v*' | xargs -r git tag -d 2>/dev/null || true
+fi
+
 git_safe fetch --tags --prune "${REMOTE}" '+refs/heads/*:refs/remotes/'"${REMOTE}"'/*'
 
 git rev-parse --verify -q "${BASE_REF}" >/dev/null || { echo "ERROR: base ref '${BASE_REF}' not found" >&2; exit 1; }
