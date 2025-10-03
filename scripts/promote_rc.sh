@@ -172,6 +172,27 @@ echo "==> Target Prod release tag: ${TAG}"
 echo "==> Fetching refs..."
 git_safe fetch --tags --prune "${REMOTE}" '+refs/heads/*:refs/remotes/'"${REMOTE}"'/*'
 
+# After fetching, verify the RC branch still exists (it might have been replaced by a newer RC)
+if ! git ls-remote --heads "${REMOTE}" | grep -q "refs/heads/${RC_BRANCH}$"; then
+  echo "WARNING: RC branch ${RC_BRANCH} no longer exists on remote (may have been replaced)"
+  echo "==> Searching for the latest RC branch for version ${VERSION}..."
+  
+  # Find the highest RC for this specific version
+  LATEST_RC_FOR_VERSION=$(git ls-remote --heads "${REMOTE}" "release/${VERSION}-rc.*" | \
+    awk '{print $2}' | \
+    sed 's#refs/heads/##' | \
+    sort -t. -k4,4n | \
+    tail -1)
+  
+  if [[ -z "${LATEST_RC_FOR_VERSION}" ]]; then
+    echo "ERROR: No RC branches found for version ${VERSION}" >&2
+    exit 1
+  fi
+  
+  RC_BRANCH="${LATEST_RC_FOR_VERSION}"
+  echo "==> Using ${RC_BRANCH} instead"
+fi
+
 # Move to RC branch and ensure up-to-date
 git_safe checkout -q "${RC_BRANCH}"
 git_safe pull --ff-only
