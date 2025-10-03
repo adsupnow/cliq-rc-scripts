@@ -47,7 +47,7 @@ Examples:
   # Start a new Dev cycle after a Prod release (creates rc.0):
   ./cut_rc.sh --bump patch --replace
   # Creates: release/2.0.21-rc.0
-  
+
   # Continue current train (increments RC number):
   ./cut_rc.sh --replace
   # Creates: release/2.0.21-rc.1, then rc.2, etc.
@@ -187,7 +187,7 @@ if [[ -n "${RC_LIST_FOR_TARGET}" ]]; then
       PREV_BRANCH="${name}"
     fi
   done <<< "${RC_LIST_FOR_TARGET}"
-  
+
   # If we found existing RCs, increment from the highest
   if (( MAX_N >= 0 )); then
     NEXT_RC=$((MAX_N + 1))
@@ -248,4 +248,6 @@ if ${REPLACE_PREV} && [[ -n "${PREV_BRANCH}" ]]; then
 fi
 
 echo "==> Done. RC branch is ${NEW_BRANCH}"
-$DRY_RUN && echo "NOTE: run without --dry-run to apply changes."
+if $DRY_RUN; then
+  echo "NOTE: run without --dry-run to apply changes."
+fi
