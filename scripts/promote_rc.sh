@@ -32,13 +32,13 @@ Usage: ./promote_rc.sh [options]
 Promote an RC branch to a Production release tag (vX.Y.Z).
 
 By default:
-  - Automatically finds and promotes the highest RC branch if --rc is not provided
+  - Uses the current branch if --rc is not provided
   - Requires the branch to match: release/X.Y.Z-rc.N
   - Creates tag: vX.Y.Z (annotated) from the RC HEAD
   - Pushes the tag to 'origin'
 
 Options:
-  --rc <branch>          RC branch to promote (e.g., release/2.0.20-rc.3). If not provided, automatically finds the latest RC
+  --rc <branch>          RC branch to promote (e.g., release/2.0.20-rc.3). Defaults to current branch
   --message "<text>"     Annotated tag message (defaults to "Release vX.Y.Z")
   --remote <name>        Remote to push tags to (default: origin)
   --dry-run              Print actions without changing anything
@@ -49,7 +49,7 @@ Package.json options (optional):
   --no-commit            Do not commit the package.json change
 
 Examples:
-  # Promote the latest RC branch to prod (auto-detects highest version):
+  # Promote the current RC branch to prod:
   ./promote_rc.sh
 
   # Promote a specific RC branch:
@@ -81,14 +81,6 @@ git_safe() {
   fi
 }
 
-find_latest_rc() {
-  # Find all RC branches, sort them, and return the highest version
-  git branch -r | grep -E "origin/release/[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$" | \
-    sed 's|.*origin/||' | \
-    sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | \
-    tail -1
-}
-
 # --- Parse args ---
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -106,28 +98,11 @@ done
 
 # --- Repo & cleanliness checks ---
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: not a git repo" >&2; exit 1; }
-
-# Stash any uncommitted changes before proceeding
-STASHED=false
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "==> Stashing uncommitted changes..."
-  if ! $DRY_RUN; then
-    git stash push -u -m "promote_rc.sh temporary stash"
-    STASHED=true
-  fi
-fi
+[[ -z "$(git status --porcelain)" ]] || { echo "ERROR: working tree not clean" >&2; exit 1; }
 
 # Determine RC branch
 if [[ -z "${RC_BRANCH}" ]]; then
-  echo "==> No --rc flag provided, finding latest RC branch..."
-  RC_BRANCH="$(find_latest_rc)"
-
-  if [[ -z "${RC_BRANCH}" ]]; then
-    echo "ERROR: No RC branches found matching pattern release/X.Y.Z-rc.N" >&2
-    exit 1
-  fi
-
-  echo "==> Found latest RC branch: ${RC_BRANCH}"
+  RC_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 fi
 
 # Validate RC branch naming
@@ -189,6 +164,17 @@ fi
 if [[ -z "${TAG_MESSAGE}" ]]; then
   TAG_MESSAGE="Release ${TAG}"
 fi
+
+# Delete local tag if it exists
+if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
+  echo "==> Deleting existing local tag ${TAG}"
+  if $DRY_RUN; then
+    echo "(dry-run) git tag -d ${TAG}"
+  else
+    git tag -d "${TAG}"
+  fi
+fi
+
 echo "==> Tagging ${TAG} from $(git rev-parse --short HEAD)"
 if $DRY_RUN; then
   echo "(dry-run) git tag -a ${TAG} -m \"${TAG_MESSAGE}\""
@@ -200,9 +186,3 @@ fi
 
 echo "==> Done. Pushed ${TAG} to ${REMOTE}."
 $DRY_RUN && echo "NOTE: run without --dry-run to apply changes."
-
-# Restore stashed changes if any
-if $STASHED; then
-  echo "==> Restoring stashed changes..."
-  git stash pop
-fi
