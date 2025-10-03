@@ -111,7 +111,16 @@ git_safe() {
 
 # --- Repo & cleanliness checks ---
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: not a git repo" >&2; exit 1; }
-[[ -z "$(git status --porcelain)" ]] || { echo "ERROR: working tree not clean" >&2; exit 1; }
+
+# Stash any uncommitted changes before proceeding
+STASHED=false
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "==> Stashing uncommitted changes..."
+  if ! $DRY_RUN; then
+    git stash push -u -m "cut_rc.sh temporary stash"
+    STASHED=true
+  fi
+fi
 
 echo "==> Fetching refs from ${REMOTE}..."
 git_safe fetch --tags --prune "${REMOTE}" '+refs/heads/*:refs/remotes/'"${REMOTE}"'/*'
@@ -250,4 +259,10 @@ fi
 echo "==> Done. RC branch is ${NEW_BRANCH}"
 if $DRY_RUN; then
   echo "NOTE: run without --dry-run to apply changes."
+fi
+
+# Restore stashed changes if any
+if $STASHED; then
+  echo "==> Restoring stashed changes..."
+  git stash pop
 fi

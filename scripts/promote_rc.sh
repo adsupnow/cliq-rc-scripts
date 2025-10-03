@@ -9,11 +9,15 @@ set -euo pipefail
 #   - Verifies the RC branch name matches release/X.Y.Z-rc.N
 #   - Creates an annotated tag vX.Y.Z from the RC branch HEAD
 #   - Pushes the tag to the remote (defaults to 'origin')
+#   - Creates and publishes a GitHub Release (triggers deployment workflows)
 #
 # Optional:
 #   - --update-pkg: Set package.json "version" to X.Y.Z on the RC branch before tagging (off by default)
 #   - --pkg <path>: Path to package.json (default: package.json)
 #   - --no-commit:  Do not commit package.json change
+#
+# Requirements:
+#   - GitHub CLI (gh) must be installed and authenticated
 #
 # See `./promote_rc.sh --help` for usage & examples.
 
@@ -29,13 +33,17 @@ print_help() {
   cat <<'EOF'
 Usage: ./promote_rc.sh [options]
 
-Promote an RC branch to a Production release tag (vX.Y.Z).
+Promote an RC branch to a Production release tag (vX.Y.Z) and publish a GitHub Release.
 
 By default:
   - Automatically finds and promotes the highest RC branch if --rc is not provided
   - Requires the branch to match: release/X.Y.Z-rc.N
   - Creates tag: vX.Y.Z (annotated) from the RC HEAD
   - Pushes the tag to 'origin'
+  - Creates and publishes a GitHub Release (triggers deployment workflows)
+
+Requirements:
+  - GitHub CLI (gh) must be installed and authenticated
 
 Options:
   --rc <branch>          RC branch to promote (e.g., release/2.0.20-rc.3). If not provided, automatically finds the latest RC
@@ -72,6 +80,24 @@ need awk
 need grep
 need sed
 need node
+
+# Check for GitHub CLI with helpful error message
+if ! command -v gh &> /dev/null; then
+  echo "ERROR: GitHub CLI (gh) is not installed" >&2
+  echo "This script requires the GitHub CLI to create releases." >&2
+  echo "Please install it: https://cli.github.com/" >&2
+  echo "" >&2
+  echo "On macOS: brew install gh" >&2
+  echo "Then authenticate: gh auth login" >&2
+  exit 1
+fi
+
+# Verify gh is authenticated
+if ! gh auth status &> /dev/null; then
+  echo "ERROR: GitHub CLI is not authenticated" >&2
+  echo "Please run: gh auth login" >&2
+  exit 1
+fi
 
 git_safe() {
   if $DRY_RUN; then
@@ -209,7 +235,15 @@ else
   git push "${REMOTE}" "${TAG}"
 fi
 
-echo "==> Done. Pushed ${TAG} to ${REMOTE}."
+# Create and publish GitHub Release
+echo "==> Creating GitHub Release for ${TAG}"
+if $DRY_RUN; then
+  echo "(dry-run) gh release create ${TAG} --title \"${TAG_MESSAGE}\" --notes \"${TAG_MESSAGE}\""
+else
+  gh release create "${TAG}" --title "${TAG_MESSAGE}" --notes "${TAG_MESSAGE}" --verify-tag
+fi
+
+echo "==> Done. Pushed ${TAG} to ${REMOTE} and published GitHub Release."
 $DRY_RUN && echo "NOTE: run without --dry-run to apply changes."
 
 # Restore stashed changes if any
