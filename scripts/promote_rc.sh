@@ -244,7 +244,9 @@ else
 fi
 
 echo "==> Done. Pushed ${TAG} to ${REMOTE} and published GitHub Release."
-$DRY_RUN && echo "NOTE: run without --dry-run to apply changes."
+if $DRY_RUN; then
+  echo "NOTE: run without --dry-run to apply changes."
+fi
 
 # Restore stashed changes if any
 if $STASHED; then
