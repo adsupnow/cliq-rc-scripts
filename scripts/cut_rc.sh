@@ -222,7 +222,7 @@ maybe_update_pkg_for_new_train() {
   local version_to_write="$1" # X.Y.Z (no rc)
   local pkg="${PKG_PATH}"
 
-  if [[ "${IS_NEW_TRAIN}" != "true" || "${NEXT_RC}" -ne 1 ]]; then
+  if [[ "${IS_NEW_TRAIN}" != "true" || "${NEXT_RC}" -ne 0 ]]; then
     return 0
   fi
 
@@ -259,10 +259,37 @@ maybe_update_pkg_for_new_train "${TARGET_VERSION}"
 # --- Push the RC branch (includes any pkg commit if made) ---
 git_safe push -u "${REMOTE}" "${NEW_BRANCH}"
 
-# --- Optionally delete previous RC branch for the same version ---
-if ${REPLACE_PREV} && [[ -n "${PREV_BRANCH}" ]]; then
-  echo "==> Deleting previous RC on remote: ${PREV_BRANCH}"
-  git_safe push "${REMOTE}" ":${PREV_BRANCH}"
+# --- Optionally delete previous RC branch ---
+if ${REPLACE_PREV}; then
+  # If this is a new train, delete the old active RC branch
+  if [[ "${IS_NEW_TRAIN}" == "true" && -n "${ACTIVE_RC_VER}" ]]; then
+    # Find the latest RC branch for the old active version
+    OLD_RC_PATTERN="release/${ACTIVE_RC_VER}-rc."
+    OLD_RC_LIST="$(git ls-remote --heads "${REMOTE}" "${OLD_RC_PATTERN}*" || true)"
+    
+    if [[ -n "${OLD_RC_LIST}" ]]; then
+      OLD_MAX_N=-1
+      OLD_PREV_BRANCH=""
+      while read -r _sha _ref; do
+        name="${_ref#refs/heads/}"   # release/X.Y.Z-rc.N
+        n="${name##*.}"              # N
+        [[ "${n}" =~ ^[0-9]+$ ]] || continue
+        if (( n > OLD_MAX_N )); then
+          OLD_MAX_N="${n}"
+          OLD_PREV_BRANCH="${name}"
+        fi
+      done <<< "${OLD_RC_LIST}"
+      
+      if [[ -n "${OLD_PREV_BRANCH}" ]]; then
+        echo "==> Deleting previous RC on remote: ${OLD_PREV_BRANCH}"
+        git_safe push "${REMOTE}" ":${OLD_PREV_BRANCH}"
+      fi
+    fi
+  # If continuing same train, delete previous RC for same version
+  elif [[ -n "${PREV_BRANCH}" ]]; then
+    echo "==> Deleting previous RC on remote: ${PREV_BRANCH}"
+    git_safe push "${REMOTE}" ":${PREV_BRANCH}"
+  fi
 fi
 
 echo "==> Done. RC branch is ${NEW_BRANCH}"
