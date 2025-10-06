@@ -4,11 +4,8 @@ This guide explains how to integrate the RC branching scripts into your CI/CD pi
 
 ## Table of Contents
 - [Overview](#overview)
-- [GitHub Actions Integration](#github-actions-integration)
-- [Workflow Summary](#workflow-summary)
-- [Testing Your Integration](#testing-your-integration)
-- [Troubleshooting](#troubleshooting)
-- [Best Practices](#best-practices)
+- [GitHub Actions Prod Integration](#github-actions-prod-integration)
+- [GitHub Actions Staging Integration](#github-actions-staging-integration)
 
 ---
 
@@ -17,45 +14,27 @@ This guide explains how to integrate the RC branching scripts into your CI/CD pi
 The RC scripts (`cut_rc.sh`, `promote_rc.sh`, `status_rc.sh`) are integrated into CI/CD pipelines by downloading them on-demand during workflow execution. This ensures you always use the latest version while keeping repositories clean.
 
 **Implementation:**
-- Scripts are downloaded from the xperience repo during GitHub Actions workflows
+- Scripts are downloaded from the cliq-rc-scripts public repo during GitHub Actions workflows
 - Production deployment automatically starts new RC trains with minor version bumps
 - Staging deployment automatically continues existing RC trains
 
 ---
 
-## GitHub Actions Integration
-
-### Script Download Method
-
-The workflows download scripts directly from the xperience repository during execution:
-
-**Pros:**
-- ✅ Always gets latest version
-- ✅ No local copies needed
-- ✅ Easy to set up
-- ✅ Consistent across all repos
-
-**Cons:**
-- ❌ Requires network access during CI
-- ❌ External dependency
-
 **Implementation:**
 ```yaml
 - name: Download RC scripts
   run: |
-    mkdir -p scripts
-    curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-      https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/cut_rc.sh -o scripts/cut_rc.sh
-    curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-      https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/status_rc.sh -o scripts/status_rc.sh
-    chmod +x scripts/*.sh
+    mkdir -p cicd_rc_scripts
+    curl -sL https://raw.githubusercontent.com/adsupnow/cliq-rc-scripts/main/scripts/cut_rc.sh -o cicd_rc_scripts/cut_rc.sh
+    curl -sL https://raw.githubusercontent.com/adsupnow/cliq-rc-scripts/main/scripts/status_rc.sh -o cicd_rc_scripts/status_rc.sh
+    chmod +x cicd_rc_scripts/*.sh
 ```
 
 > **Note**: If the xperience repository is private, you must include the `Authorization` header with a GitHub token that has access to the repository.
 
 ---
-
-### Example: Production Deployment with RC Automation
+## Github Actions Prod Integration
+### Example
 
 This example shows a production deployment workflow that automatically starts a new RC train after successful deployment.
 
@@ -63,6 +42,8 @@ Create `.github/workflows/deploy-prod.yml` in your target repository:
 
 ```yaml
 name: Ad Broker API Production Deployment
+
+run-name: "${{ format('🎉 Production Deploy - {0}', github.ref_name) }}"
 
 on:
     release:
@@ -145,7 +126,7 @@ jobs:
               with:
                 project_id: 'xperience-prod'
                 credentials_json: ${{ secrets.XPERIENCE_PROD_SERVICE_ACCOUNT }}
-          
+
             - name: Deploy to Cloud Run
               uses: 'google-github-actions/deploy-cloudrun@v2'
               with:
@@ -156,52 +137,121 @@ jobs:
     Start-New-RC-Train:
         needs: Deploy
         runs-on: ubuntu-latest
-        
+
         permissions:
             contents: write
-        
+
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4
               with:
                 fetch-depth: 0
-                token: ${{ secrets.GITHUB_TOKEN }}
-            
-            - name: Download RC scripts
+                token: ${{ secrets.CI_PAT }}
+
+            - name: Determine if this is a hotfix release
+              id: release_type
               run: |
-                mkdir -p scripts
-                curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                  https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/cut_rc.sh -o scripts/cut_rc.sh
-                curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                  https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/status_rc.sh -o scripts/status_rc.sh
-                chmod +x scripts/*.sh
-            
+                RELEASE_TAG="${{ github.event.release.tag_name }}"
+                echo "Release tag: $RELEASE_TAG"
+
+                # Get current version from package.json
+                CURRENT_VERSION=$(node -p "require('./package.json').version")
+                echo "Current package.json version: $CURRENT_VERSION"
+
+                # Remove 'v' prefix from tag if present
+                RELEASE_VERSION=${RELEASE_TAG#v}
+                echo "Release version (cleaned): $RELEASE_VERSION"
+
+                # Parse semantic versions (X.Y.Z)
+                IFS='.' read -r CURRENT_MAJOR CURRENT_MINOR CURRENT_PATCH <<< "$CURRENT_VERSION"
+                IFS='.' read -r RELEASE_MAJOR RELEASE_MINOR RELEASE_PATCH <<< "$RELEASE_VERSION"
+
+                # Detect hotfix: same major.minor but patch is incremented
+                if [[ "$RELEASE_MAJOR" == "$CURRENT_MAJOR" && "$RELEASE_MINOR" == "$CURRENT_MINOR" && "$RELEASE_PATCH" -gt "$CURRENT_PATCH" ]]; then
+                  echo "is_hotfix=true" >> $GITHUB_OUTPUT
+                  echo "🔧 Detected hotfix release - no RC train action needed"
+                else
+                  echo "is_hotfix=false" >> $GITHUB_OUTPUT
+                  echo "🚀 Detected normal release - will start new RC train"
+                fi
+
+            - name: Download RC scripts
+              if: steps.release_type.outputs.is_hotfix == 'false'
+              run: |
+                mkdir -p cicd_rc_scripts
+                curl -sL https://raw.githubusercontent.com/adsupnow/cliq-rc-scripts/main/scripts/cut_rc.sh -o cicd_rc_scripts/cut_rc.sh
+                curl -sL https://raw.githubusercontent.com/adsupnow/cliq-rc-scripts/main/scripts/status_rc.sh -o cicd_rc_scripts/status_rc.sh
+                chmod +x cicd_rc_scripts/*.sh
+
             - name: Configure Git
+              if: steps.release_type.outputs.is_hotfix == 'false'
               run: |
                 git config user.name "github-actions[bot]"
                 git config user.email "github-actions[bot]@users.noreply.github.com"
-            
+
             - name: Setup Node.js
+              if: steps.release_type.outputs.is_hotfix == 'false'
               uses: actions/setup-node@v4
               with:
                 node-version: '22'
-            
-            - name: Start new RC train
+
+            - name: Update package.json on main and start new RC train (normal releases only)
+              if: steps.release_type.outputs.is_hotfix == 'false'
               run: |
-                echo "Starting new RC train with minor version bump"
-                ./scripts/cut_rc.sh --bump minor --replace
-            
+                echo "Updating package.json on main branch with minor version bump"
+
+                # Checkout main branch (we're currently on detached HEAD from the release tag)
+                echo "Checking out main branch..."
+                git checkout main
+                git pull origin main
+
+                # Get current version and bump minor
+                CURRENT_VERSION=$(node -p "require('./package.json').version")
+                echo "Current version: $CURRENT_VERSION"
+
+                # Bump minor version
+                npm version minor --no-git-tag-version
+                NEW_VERSION=$(node -p "require('./package.json').version")
+                echo "New version: $NEW_VERSION"
+
+                # Commit and push to main
+                git add package.json
+                git commit -m "chore: bump minor version to $NEW_VERSION after production release"
+                git push origin main
+
+                echo "✅ Version bump complete. Ready for new RC train."
+                echo ""
+                echo "🔧 Next step: Create new RC train manually:"
+                echo "   ./cut_rc.sh --version $NEW_VERSION --replace"
+
             - name: Post summary
               if: success()
               run: |
-                echo "## ✅ New RC Train Started" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
-                echo "A new release candidate train has been created with a minor version bump." >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
-                ./scripts/status_rc.sh >> $GITHUB_STEP_SUMMARY
+                if [[ "${{ steps.release_type.outputs.is_hotfix }}" == "true" ]]; then
+                  echo "## 🔧 Hotfix Release Deployed" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "**Release Type:** Hotfix" >> $GITHUB_STEP_SUMMARY
+                  echo "**Action:** Deploy only - no RC train changes" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "ℹ️ **Next Step:** Release engineer should manually merge hotfix branch into main" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "## ✅ Production Release Complete" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "**Release Type:** Normal" >> $GITHUB_STEP_SUMMARY
+                  echo "**Action:** Version bumped to \`$(node -p "require('./package.json').version")\` on main" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### 🔧 Next Step: Create New RC Train" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "Run this command to start the new development train:" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+                  echo "./cut_rc.sh --version $(node -p "require('./package.json').version") --replace" >> $GITHUB_STEP_SUMMARY
+                  echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+                fi
 ```
 
-### Example: Staging Deployment with RC Continuation
+## Github Actions Staging Integration
+### Example
 
 This example shows a staging deployment workflow that automatically continues the RC train after successful deployment to staging.
 
@@ -210,17 +260,123 @@ Create `.github/workflows/deploy-staging.yml` in your target repository:
 ```yaml
 name: Ad Broker API Staging Deployment
 
+run-name: "${{ github.ref == 'refs/heads/main' && '🚀 Staging Deploy - auto rc++' || format('🚀 Staging Deploy - {0}', github.ref_name) }}"
+
 on:
     push:
         branches:
             - main
-            - 'release/**'
 
 jobs:
-    Build:
+    Continue-RC-Train:
         runs-on: ubuntu-latest
+        if: github.ref == 'refs/heads/main'
+
+        permissions:
+            contents: write
+
+        outputs:
+            rc_branch: ${{ steps.rc_train.outputs.branch }}
+
         steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                fetch-depth: 0
+                token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Configure Git
+              run: |
+                git config user.name "github-actions[bot]"
+                git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            - name: Download RC scripts
+              run: |
+                mkdir -p cicd_rc_scripts
+                curl -sL https://raw.githubusercontent.com/adsupnow/cliq-rc-scripts/main/scripts/cut_rc.sh -o cicd_rc_scripts/cut_rc.sh
+                curl -sL https://raw.githubusercontent.com/adsupnow/cliq-rc-scripts/main/scripts/status_rc.sh -o cicd_rc_scripts/status_rc.sh
+                chmod +x cicd_rc_scripts/*.sh
+
+                # Patch the script to skip the working tree check in CI/CD
+                sed -i 's/\[\[ -z "$(git status --porcelain)" \]\] || { echo "ERROR: working tree not clean" >&2; exit 1; }/# CI\/CD: Skip working tree check/' cicd_rc_scripts/cut_rc.sh
+
+                # Fix the DRY_RUN bug if it exists in the public repo
+                sed -i 's/\$DRY_RUN && echo "NOTE: run without --dry-run to apply changes\."/if \$DRY_RUN; then\n  echo "NOTE: run without --dry-run to apply changes\."\nfi/' cicd_rc_scripts/cut_rc.sh
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                node-version: '22'
+
+            - name: Continue RC train
+              id: rc_train
+              run: |
+                set +e  # Disable exit on error for this entire step
+                echo "📦 Continuing existing RC train"
+                OUTPUT=$(./cicd_rc_scripts/cut_rc.sh --replace 2>&1)
+                EXIT_CODE=$?
+
+                echo "$OUTPUT"
+
+                if [ $EXIT_CODE -ne 0 ]; then
+                  echo "ERROR: cut_rc.sh failed with exit code $EXIT_CODE"
+                  exit $EXIT_CODE
+                fi                # Extract the branch name from the output
+                RC_BRANCH=$(echo "$OUTPUT" | grep "==> Done. RC branch is" | sed 's/.*RC branch is //' | xargs)
+
+                if [ -z "$RC_BRANCH" ]; then
+                  echo "ERROR: Could not determine RC branch from script output"
+                  echo "Output was:"
+                  echo "$OUTPUT"
+                  exit 1
+                fi
+
+                echo "branch=$RC_BRANCH" >> $GITHUB_OUTPUT
+                echo "Created RC branch: $RC_BRANCH"
+
+                exit 0  # Explicitly exit with success
+
+            - name: Post summary
+              if: success()
+              run: |
+                echo "## ✅ RC Train Continued" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "**New RC branch created:** \`${{ steps.rc_train.outputs.branch }}\`" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "This RC branch will be built and deployed to staging." >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                ./cicd_rc_scripts/status_rc.sh >> $GITHUB_STEP_SUMMARY
+
+    Build:
+        needs: [Continue-RC-Train]
+        if: always() && (needs.Continue-RC-Train.result == 'success' || needs.Continue-RC-Train.result == 'skipped')
+        runs-on: ubuntu-latest
+
+        outputs:
+            image_sha: ${{ steps.get_sha.outputs.sha }}
+
+        steps:
+            - name: Determine branch to build
+              id: branch
+              run: |
+                if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+                  echo "ref=${{ needs.Continue-RC-Train.outputs.rc_branch }}" >> $GITHUB_OUTPUT
+                else
+                  echo "ref=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+                fi
+
             - uses: actions/checkout@v4
+              with:
+                ref: ${{ steps.branch.outputs.ref }}
+
+            - name: Get commit SHA
+              id: get_sha
+              run: |
+                SHA=$(git rev-parse HEAD)
+                BRANCH="${{ steps.branch.outputs.ref }}"
+                echo "sha=$SHA" >> $GITHUB_OUTPUT
+                echo "🔨 Building branch: $BRANCH"
+                echo "📝 Commit SHA: $SHA"
 
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
@@ -242,18 +398,45 @@ jobs:
 
             - name: Build Docker image
               run: |
-                docker build -f Dockerfile.cloudrun -t gcr.io/xperience-staging/xperience-adbroker:${{ github.sha }} .
+                docker build -f Dockerfile.cloudrun -t gcr.io/xperience-staging/xperience-adbroker:${{ steps.get_sha.outputs.sha }} .
 
             - name: Push Docker image to GCR
               run: |
-                docker push gcr.io/xperience-staging/xperience-adbroker:${{ github.sha }}
+                docker push gcr.io/xperience-staging/xperience-adbroker:${{ steps.get_sha.outputs.sha }}
+
+            - name: Post build summary
+              if: success()
+              run: |
+                echo "## 🔨 Build Complete" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+                  echo "**Branch Built:** \`${{ needs.Continue-RC-Train.outputs.rc_branch }}\`" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "**Branch Built:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+                fi
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "**Commit SHA:** \`${{ steps.get_sha.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "**Image:** \`gcr.io/xperience-staging/xperience-adbroker:${{ steps.get_sha.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
 
     Database-Migrate:
-      needs: Build
+      needs: [Continue-RC-Train, Build]
+      if: always() && needs.Build.result == 'success'
       runs-on: ubuntu-latest
 
       steps:
+        - name: Determine branch to checkout
+          id: branch
+          run: |
+            if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+              echo "ref=${{ needs.Continue-RC-Train.outputs.rc_branch }}" >> $GITHUB_OUTPUT
+            else
+              echo "ref=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            fi
+
         - uses: actions/checkout@v4
+          with:
+            ref: ${{ steps.branch.outputs.ref }}
 
         - uses: mattes/gce-cloudsql-proxy-action@v1
           with:
@@ -284,9 +467,20 @@ jobs:
             DATABASE_URL: mysql://root:${{ steps.secrets.outputs.token }}@localhost:3306/adbroker
 
     Deploy:
-        needs: Database-Migrate
+        needs: [Continue-RC-Train, Database-Migrate, Build]
+        if: always() && needs.Database-Migrate.result == 'success'
         runs-on: ubuntu-latest
         steps:
+            - name: Display deployment info
+              run: |
+                echo "🚀 Deploying to Staging"
+                if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+                  echo "📦 Branch: ${{ needs.Continue-RC-Train.outputs.rc_branch }}"
+                else
+                  echo "📦 Branch: ${{ github.ref_name }}"
+                fi
+                echo "🏷️  Image SHA: ${{ needs.Build.outputs.image_sha }}"
+
             - id: auth_staging
               name: Log in to Google Cloud
               uses: google-github-actions/auth@v2
@@ -299,213 +493,22 @@ jobs:
               with:
                 service: xperience-adbroker
                 project_id: xperience-staging
-                image: gcr.io/xperience-staging/xperience-adbroker:${{ github.sha }}
+                image: gcr.io/xperience-staging/xperience-adbroker:${{ needs.Build.outputs.image_sha }}
 
-    Continue-RC-Train:
-        needs: Deploy
-        runs-on: ubuntu-latest
-        
-        permissions:
-            contents: write
-        
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v4
-              with:
-                fetch-depth: 0
-                token: ${{ secrets.GITHUB_TOKEN }}
-            
-            - name: Download RC scripts
-              run: |
-                mkdir -p scripts
-                curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                  https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/cut_rc.sh -o scripts/cut_rc.sh
-                curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                  https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/status_rc.sh -o scripts/status_rc.sh
-                chmod +x scripts/*.sh
-            
-            - name: Configure Git
-              run: |
-                git config user.name "github-actions[bot]"
-                git config user.email "github-actions[bot]@users.noreply.github.com"
-            
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                node-version: '22'
-            
-            - name: Continue RC train
-              run: |
-                echo "Continuing existing RC train"
-                ./scripts/cut_rc.sh --replace
-            
-            - name: Post summary
+            - name: Post deployment summary
               if: success()
               run: |
-                echo "## ✅ RC Train Continued" >> $GITHUB_STEP_SUMMARY
+                echo "## 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
                 echo "" >> $GITHUB_STEP_SUMMARY
-                echo "The release candidate has been incremented after successful staging deployment." >> $GITHUB_STEP_SUMMARY
+                if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+                  echo "**Branch Deployed:** \`${{ needs.Continue-RC-Train.outputs.rc_branch }}\`" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "**Branch Deployed:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+                fi
                 echo "" >> $GITHUB_STEP_SUMMARY
-                ./scripts/status_rc.sh >> $GITHUB_STEP_SUMMARY
+                echo "**Image SHA:** \`${{ needs.Build.outputs.image_sha }}\`" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "**Environment:** Staging (xperience-staging)" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "**Service:** xperience-adbroker" >> $GITHUB_STEP_SUMMARY
 ```
-
-### Workflow Summary
-
-**Production Workflow (deploy-prod.yml)**:
-- **Trigger**: Release published
-- **RC Action**: Starts new train with `--bump minor --replace`
-- **Result**: Creates `release/X.Y.0-rc.0` for next version
-
-**Staging Workflow (deploy-staging.yml)**:
-- **Trigger**: Push to `main` branch or `release/**` branches
-- **RC Action**: Continues train with `--replace`
-- **Result**: Increments to `release/X.Y.Z-rc.1`, `rc.2`, etc.
-- **Use Cases**: 
-  - Normal: Merge to main → auto-deploy → auto-continue RC
-  - Manual: Push directly to release branch for hotfixes/cherry-picks
-
-**Future Enhancement**: PR labels could be used to control version bumping in production (major/minor/patch). Currently, production always bumps minor.
-
----
-
-## Testing Your Integration
-
-### Manual Test
-```bash
-# Test scripts locally before CI/CD integration
-./scripts/status_rc.sh --verbose
-./scripts/cut_rc.sh --bump minor --replace --dry-run
-```
-
-### CI Test - Production Workflow
-1. Create a GitHub release and publish it
-2. Check GitHub Actions logs for the `Start-New-RC-Train` job
-3. Verify new RC branch created: `git fetch && git branch -r | grep release/`
-4. Confirm it starts with `rc.0`
-
-### CI Test - Staging Workflow
-1. **Normal flow**: Push changes to `main` branch (or merge a PR)
-2. **Manual flow**: Push directly to a `release/**` branch (for hotfixes)
-3. Check GitHub Actions logs for the `Continue-RC-Train` job
-4. Verify RC was incremented (e.g., `rc.0` → `rc.1`)
-5. Check GitHub Actions summary for status
-
----
-
-## Troubleshooting
-
-### Script Download Issues
-
-**Problem:** Script not found
-```
-Error: ./scripts/cut_rc.sh: No such file or directory
-```
-
-**Solution:** Verify the download step completed successfully and scripts directory was created:
-```yaml
-- name: Download RC scripts
-  run: |
-    mkdir -p scripts
-    curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-      https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/cut_rc.sh -o scripts/cut_rc.sh
-    curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-      https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/status_rc.sh -o scripts/status_rc.sh
-    chmod +x scripts/*.sh
-```
-
-**Problem:** Permission denied
-```
-Error: Permission denied: ./scripts/cut_rc.sh
-```
-
-**Solution:** Ensure scripts are made executable after download:
-```yaml
-chmod +x scripts/*.sh
-```
-
-**Problem:** curl fails to download
-```
-Error: Failed to connect to raw.githubusercontent.com
-```
-OR
-```
-./scripts/cut_rc.sh: line 1: 404:: command not found
-```
-
-**Solution:** This happens when the xperience repository is private. Add authentication to the curl command:
-```yaml
-- name: Download RC scripts
-  run: |
-    mkdir -p scripts
-    for i in {1..3}; do
-      curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-        https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/cut_rc.sh -o scripts/cut_rc.sh && \
-      curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-        https://raw.githubusercontent.com/adsupnow/xperience/main/scripts/status_rc.sh -o scripts/status_rc.sh && \
-      break
-      sleep 2
-    done
-    chmod +x scripts/*.sh
-```
-
-**Alternative:** Make the xperience repository public if the scripts contain no sensitive information.
-
-### Git Push Issues
-```
-Error: failed to push some refs
-```
-
-**Solution:** Check token permissions and configure Git:
-```yaml
-- uses: actions/checkout@v4
-  with:
-    token: ${{ secrets.GITHUB_TOKEN }}
-    fetch-depth: 0
-```
-
-### Node.js Issues
-
-**Problem:** Node not found
-```
-Error: Missing required command: node
-```
-
-**Solution:** Ensure Node.js setup step is included:
-```yaml
-- name: Setup Node.js
-  uses: actions/setup-node@v4
-  with:
-    node-version: '22'
-```
-
-**Problem:** package.json not found
-```
-Error: package.json not found
-```
-
-**Solution:** Ensure you're running from repository root and package.json exists.
-
----
-
-## Best Practices
-
-1. **Version Pinning**: Consider pinning to specific script versions or commits for production stability
-2. **Testing**: Always test with `--dry-run` first when setting up new repositories
-3. **Monitoring**: Set up GitHub Actions notifications for workflow failures
-4. **Documentation**: Document any repo-specific customizations in the README
-5. **Rollback Plan**: Know how to manually cut RC if automation fails (run scripts locally)
-6. **Security**: Use secrets for tokens, never hardcode credentials
-7. **Idempotency**: Scripts are designed to be safely re-run if workflows fail
-
----
-
-## Next Steps
-
-1. Copy the production and staging workflow examples to your repository
-2. Update the workflow files with your specific configuration (project IDs, service names, etc.)
-3. Test manually with `--dry-run` flag before enabling automation
-4. Monitor the first few automated runs to ensure everything works as expected
-5. Document any repo-specific customizations in your README
-6. Set up GitHub Actions notifications for workflow failures
-
-For more details on the scripts themselves, refer to the [RC Branching Scripts Documentation](./rc-branching-scripts.md).
