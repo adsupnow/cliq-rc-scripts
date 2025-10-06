@@ -70,7 +70,7 @@ flowchart TD
     CutHotfix --> WriteCode[💻 Write code to fix issue<br/>Minimal change only]
     WriteCode --> BumpPatch[� Bump patch in package.json<br/>2.3.0 → 2.3.1]
     BumpPatch --> CreateTag[🏷️ Create new tag and publish<br/>git tag v2.3.1 && git push origin v2.3.1]
-    CreateTag --> MergeHotfix[� Merge hotfix branch into main<br/>Integration via PR]
+    CreateTag --> MergeHotfix[� Merge hotfix branch into main<br/>Directly merge or Integration via PR]
     MergeHotfix --> HotfixComplete[✅ Hotfix complete]
     HotfixComplete --> Start
     
@@ -98,7 +98,7 @@ flowchart TD
 - **Write code to fix issue**: Minimal changes only
 - **Bump patch in package.json**: `2.3.0 → 2.3.1`
 - **Create new tag and publish**: Manual tag creation
-- **Merge hotfix branch into main**: Integration via PR
+- **Merge hotfix branch into main**: Directly merge or Integration via PR
 
 ---
 
