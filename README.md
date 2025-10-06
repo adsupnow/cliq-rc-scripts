@@ -110,7 +110,7 @@ These scripts enforce a structured release workflow:
 
 ### Making Scripts Executable
 
-Before you can run these scripts from anywhere in your filesystem, you need to make them executable:
+Before you can run these scripts from anywhere in your filesystem, you need to pull down the repo and make them executable:
 
 ```bash
 git clone git@github.com:adsupnow/cliq-rc-scripts.git
