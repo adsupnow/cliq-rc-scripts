@@ -1,366 +1,130 @@
-# RC Release Management Scripts
+# RC Release Management
 
-This repository contains automated scripts for managing release candidates (RC) in a hybrid development workflow. The scripts support two distinct lifecycles: **Normal Development** (hybrid automation) and **Hotfix** (manual process).
+This document provides two perspectives on the RC (Release Candidate) lifecycle: the **Developer's perspective** focusing on feature development and collaboration, and the **Release Engineer's perspective** focusing on version management and deployment orchestration.
 
 ## Table of Contents
-- [🚀 Normal Development Lifecycle](#-normal-development-lifecycle)
-- [🔧 Hotfix Lifecycle](#-hotfix-lifecycle)
-- [🎯 Key Insights](#-key-insights)
-- [Scripts Overview](#scripts-overview)
-- [Setup](#setup)
-- [Script Documentation](#script-documentation)
-- [Workflow Examples](#workflow-examples)
-- [Troubleshooting](#troubleshooting)
+- [Developer's Perspective](#developers-perspective)
+- [Release Engineer's Perspective](#release-engineers-perspective)
+- [Key Interactions](#key-interactions)
+- [Scripts and Detailed Workflow](./docs/rc-release-scripts.md)
 - [CI/CD Integration](./docs/ci-cd-integration.md)
 
 ---
 
-## 🚀 Normal Development Lifecycle
-*Starting from production tag creation*
+## Developer's Perspective
 
-📊 **[View Interactive Flow Diagram →](./docs/normal-development-flow.md)**
+From a developer's standpoint, the lifecycle is a simple, repeatable workflow focused on feature development and collaboration.
 
-### 1. Production Release Milestone
-✅ **Production tag created** (e.g., `v2.11.0`) from latest RC  
-✅ **Production workflow triggers**: Deploy + bump main to next minor (`2.12.0`)  
-✅ **Main becomes**: The starting point for next development cycle  
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#2E86AB', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#2E86AB', 'lineColor': '#333333', 'secondaryColor': '#A23B72', 'tertiaryColor': '#F18F01', 'background': '#ffffff', 'mainBkg': '#ffffff'}, 'flowchart': {'nodeSpacing': 50, 'rankSpacing': 60}}}%%
+flowchart TD
+    Start([🎯 Ready for<br/>new work]) --> Checkout[📍 Checkout main and create branch<br/>git checkout main<br/>git checkout -b feature/EN-1234]
+    
+    Checkout --> Develop[💻 Write code, tests, docs<br/>Implement feature or fix]
+    
+    Develop --> OpenPR[📝 Open PR targeting main<br/>Pull Request created]
+    
+    OpenPR --> CodeReview[👥 Code review & approval<br/>Team feedback & iterations]
+    
+    CodeReview --> Merge[✅ Merge into main<br/>PR approved and merged]
+    
+    Merge --> Repeat[🔄 Repeat<br/>Next feature or fix]
+    Repeat --> Start
+    
+    %% Styling
+    classDef devNode fill:#2E86AB,stroke:#1E5F74,stroke-width:2px,color:#ffffff
+    classDef processNode fill:#F18F01,stroke:#D4730A,stroke-width:2px,color:#ffffff
+    classDef startEndNode fill:#2C3E50,stroke:#1B2631,stroke-width:3px,color:#ffffff
+    
+    class Start,Repeat startEndNode
+    class Checkout,Develop,OpenPR,Merge devNode
+    class CodeReview processNode
+```
 
-### 2. New Development Train Starts
-🔧 **Engineer runs**: `../cliq-rc-scripts/cut_rc.sh --version 2.12.0 --replace`  
-🔧 **Or similarly grabbing the latest/recent bumped version**: `../cliq-rc-scripts/cut_rc.sh --version $(node -p "require('./package.json').version") --replace`  
-✅ **New RC created**: `release/2.12.0-rc.0` (first staging snapshot)  
-✅ **Development begins**: Feature branches cut from main  
-
-### 3. Active Development Phase
-👥 **Engineers create**: Feature branches from main (`feature/EN-1234-cool-thing`)  
-📝 **Work flows through**: PRs back to main  
-🔄 **Each main merge**: Triggers staging → continues RC train (`rc.0` → `rc.1` → `rc.2`...)  
-🧪 **Each RC deployment**: Tests the cumulative changes on staging  
-
-### 4. Ready for Next Release
-✅ **Latest RC**: Contains all merged features (e.g., `release/2.12.0-rc.8`)  
-🚀 **Engineer promotes**: `../cliq-rc-scripts/promote_rc.sh` → creates `v2.12.0` tag  
-🔄 **Cycle repeats**: Back to step 1 with `2.13.0`  
+### Developer's Simple Workflow:
+- **Branch Creation**: Checkout main and create feature/bug branches
+- **Development**: Write code, tests, and documentation
+- **Pull Request**: Open PR targeting main branch
+- **Code Review**: Collaborate with team on code review and approval
+- **Merge & Repeat**: Merge into main and start the next piece of work
 
 ---
 
-## 🔧 Hotfix Lifecycle
-*Starting with cutting hotfix branch*
+## Release Engineer's Perspective
 
-📊 **[View Interactive Flow Diagram →](./docs/hotfix-lifecycle-flow.md)**
+From a release engineer's standpoint, there are two distinct workflows: normal releases and emergency hotfixes.
 
-### 1. Production Issue Identified
-🚨 **Critical bug found** in production `v2.11.0`  
-📍 **Current state**: Main is ahead at `2.12.0-rc.5`, production is behind  
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#8E44AD', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#8E44AD', 'lineColor': '#333333', 'secondaryColor': '#E67E22', 'tertiaryColor': '#27AE60', 'background': '#ffffff', 'mainBkg': '#ffffff'}, 'flowchart': {'nodeSpacing': 50, 'rankSpacing': 60}}}%%
+flowchart TD
+    Start([🚀 Ready to<br/>manage release]) --> ReleaseType{Release Type?}
+    
+    %% Normal Release Path
+    ReleaseType -->|Normal Release| PromoteRC[🎯 Promote latest RC<br/>./promote_rc.sh]
+    PromoteRC --> StartNewTrain[🔧 Start new RC train<br/>cut_rc.sh --version $package.json --replace]
+    StartNewTrain --> NormalComplete[✅ Normal release complete]
+    NormalComplete --> Start
+    
+    %% Hotfix Path  
+    ReleaseType -->|Hotfix| CutHotfix[⚡ Cut hotfix branch from prod tag<br/>git checkout -b hotfix/fix v2.3.0]
+    CutHotfix --> WriteCode[💻 Write code to fix issue<br/>Minimal change only]
+    WriteCode --> BumpPatch[� Bump patch in package.json<br/>2.3.0 → 2.3.1]
+    BumpPatch --> CreateTag[🏷️ Create new tag and publish<br/>git tag v2.3.1 && git push origin v2.3.1]
+    CreateTag --> MergeHotfix[� Merge hotfix branch into main<br/>Integration via PR]
+    MergeHotfix --> HotfixComplete[✅ Hotfix complete]
+    HotfixComplete --> Start
+    
+    %% Styling
+    classDef engineerNode fill:#8E44AD,stroke:#6C3483,stroke-width:2px,color:#ffffff
+    classDef hotfixNode fill:#E74C3C,stroke:#C0392B,stroke-width:2px,color:#ffffff
+    classDef processNode fill:#E67E22,stroke:#CA6F1E,stroke-width:2px,color:#ffffff
+    classDef decisionNode fill:#3498DB,stroke:#2E86C1,stroke-width:2px,color:#ffffff
+    classDef startEndNode fill:#2C3E50,stroke:#1B2631,stroke-width:3px,color:#ffffff
+    
+    class Start startEndNode
+    class PromoteRC,StartNewTrain,NormalComplete engineerNode
+    class CutHotfix,WriteCode,BumpPatch,CreateTag,MergeHotfix,HotfixComplete hotfixNode
+    class ReleaseType decisionNode
+```
 
-### 2. Hotfix Branch Creation
-🔧 **Engineer cuts**: `git checkout -b hotfix/critical-bug v2.11.0` (from production tag)  
-🛠️ **Fix applied**: Minimal change to address the issue  
-📦 **Version bumped**: `package.json` → `2.11.1` (patch increment)  
+### Release Engineer's Workflows:
 
-### 3. Hotfix Release
-🏷️ **Tag created**: `v2.11.1` from hotfix branch  
-🚀 **Production deploys**: Hotfix goes live immediately  
-✅ **Production workflow**: Detects hotfix → deploys only (no RC train changes)  
+#### **Normal Release**
+- **Promote latest RC**: `./promote_rc.sh`
+- **Start new RC train**: `cut_rc.sh --version $(node -p "require('./package.json').version") --replace`
 
-### 4. Integration Back to Main
-📝 **Engineer creates PR**: Merge `hotfix/critical-bug` → `main`  
-👀 **Team reviews**: Visible integration of production fix  
-✅ **PR merged**: Hotfix code now in main alongside ongoing development  
-
-### 5. Staging Picks Up Hotfix
-🔄 **Staging workflow**: Triggered by main merge  
-📦 **Continues RC**: `release/2.12.0-rc.5` → `release/2.12.0-rc.6` (now includes hotfix)  
-🧪 **Staging testing**: Validates hotfix works with new features  
+#### **Hotfix Release**
+- **Cut hotfix branch from prod tag**: Manual branch creation
+- **Write code to fix issue**: Minimal changes only
+- **Bump patch in package.json**: `2.3.0 → 2.3.1`
+- **Create new tag and publish**: Manual tag creation
+- **Merge hotfix branch into main**: Integration via PR
 
 ---
 
-## 🎯 Key Insights
+## Key Interactions
 
-### Normal Development:
-- **Linear progression**: Each cycle builds on the last  
-- **Predictable**: Version bumps and RC creation follow pattern  
-- **Collaborative**: Multiple features flow through main  
+The two perspectives intersect at critical points:
 
-### Hotfix Process:
-- **Branch from production**: Not from main (which may be ahead)  
-- **Manual integration**: Visible via PR process for team awareness  
-- **Non-disruptive**: Doesn't interfere with ongoing development train  
-- **Eventually consistent**: Hotfix gets into next release automatically  
+### 🤝 **Collaboration Points**
 
----
+| **Phase** | **Developer** | **Release Engineer** |
+|-----------|---------------|---------------------|
+| **Feature Ready** | Merges PR to main | Monitors main activity for RC triggers |
+| **Staging Issues** | Fixes bugs found in staging | Communicates staging status & blocking issues |
+| **Production Readiness** | Confirms features work correctly | Makes go/no-go decision for production |
+| **Hotfix Required** | Implements minimal fix | Coordinates hotfix deployment & integration |
 
-## Scripts Overview
+### 🔄 **Automated Handoffs**
 
-The release management workflow consists of three main scripts that support both normal development and hotfix processes:
+- **PR Merge → RC Creation**: Developer merges trigger automatic RC progression
+- **Production Deploy → Version Bump**: Production deployment triggers next cycle setup
+- **Hotfix Tag → CI/CD**: Emergency deployments trigger automatic production workflows
 
-1. **`cut_rc.sh`** - Creates or advances release candidate branches
-2. **`promote_rc.sh`** - Promotes an RC branch to a production release tag  
-3. **`status_rc.sh`** - Shows current release state and recommends next actions
+### 📊 **Shared Responsibilities**
 
-These scripts enforce a structured release workflow:
-- Development happens on `main`
-- Release candidates are cut to `release/X.Y.Z-rc.N` branches
-- After testing, RCs are promoted to production tags `vX.Y.Z`
-- Hotfixes branch from production tags and integrate back to main
+- **Staging Environment**: Both monitor for issues, developers fix, engineers coordinate
+- **Production Stability**: Developers respond to issues, engineers manage deployment process
+- **Process Improvement**: Both contribute feedback to improve the overall workflow
 
----
-
-## Setup
-
-### Making Scripts Executable
-
-Before you can run these scripts from anywhere in your filesystem, you need to pull down the repo and make them executable:
-
-```bash
-git clone git@github.com:adsupnow/cliq-rc-scripts.git
-```
-
-```bash
-chmod +x ../cliq-rc-scripts/scripts/cut_rc.sh
-chmod +x ../cliq-rc-scripts/promote_rc.sh  
-chmod +x ../cliq-rc-scripts/status_rc.sh
-```
-
-Or to make all scripts in the directory executable at once:
-
-```bash
-chmod +x ../cliq-rc-scripts/scripts/*.sh
-```
-
----
-
-## Script Documentation
-**Used in the staging and prod github actions or by the engineer managing the production release or hotfix.**
-
-### cut_rc.sh
-
-**Purpose**: Creates or advances release candidate branches from the main branch.
-
-**Usage**:
-```bash
-./cut_rc.sh [options]
-```
-
-**Key Options**:
-- `--version X.Y.Z` - Force specific target version  
-- `--bump <patch|minor|major>` - Start a new train with semantic version bump  
-- `--base <ref>` - Base ref for cutting RC (default: `origin/main`)  
-- `--replace` - Delete previous RC branch for the same version  
-- `--dry-run` - Preview actions without making changes  
-
-**Examples**:
-```bash
-# Start new development cycle after production release
-./cut_rc.sh --version 2.12.0 --replace
-
-# Continue existing RC train (rc.0 → rc.1 → rc.2...)  
-./cut_rc.sh --replace
-```
-
-### promote_rc.sh
-
-**Purpose**: Promotes a tested release candidate branch to a production release tag.
-
-**Usage**:
-```bash
-./promote_rc.sh [options]
-```
-
-**Key Options**:
-- `--rc <branch>` - RC branch to promote (defaults to current branch)  
-- `--message "<text>"` - Custom annotated tag message  
-- `--dry-run` - Preview actions without making changes  
-
-**Examples**:
-```bash
-# Promote latest RC to production
-./promote_rc.sh
-
-# Promote specific RC branch  
-./promote_rc.sh --rc release/2.12.0-rc.8
-
-# Promote with custom message
-./promote_rc.sh --message "Release v2.12.0 - New features and bug fixes"
-```
-
-### status_rc.sh
-
-**Purpose**: Displays the current state of release management and provides intelligent recommendations.
-
-**Usage**:
-```bash
-./status_rc.sh [options]
-```
-
-**Key Options**:
-- `--commits` - Show commits since last release  
-- `--verbose` - Show additional details like authors and commit counts  
-- `--max <n>` - Maximum commits to display (default: 10)  
-
-**Examples**:
-```bash
-# Check current release state
-./status_rc.sh
-
-# See what commits are ready for next release  
-./status_rc.sh --commits
-
-# Detailed status for team reviews
-./status_rc.sh --verbose --commits --max 20
-```
-
----
-
-## Workflow Examples
-
-### Normal Development Lifecycle Example
-
-#### Starting New Development Cycle (After Production Release)
-```bash
-# Production v2.11.0 was just released
-# Main gets bumped to 2.12.0 (automated)
-./cut_rc.sh --version 2.12.0 --replace
-# Creates: release/2.12.0-rc.0
-```
-
-#### Active Development Phase  
-```bash
-# Engineer merges feature PR to main
-# Staging needs latest changes
-./cut_rc.sh --replace  
-# Creates: release/2.12.0-rc.1 (deletes rc.0)
-
-# Another feature merged
-./cut_rc.sh --replace
-# Creates: release/2.12.0-rc.2 (deletes rc.1)
-
-# Continue until ready for production...
-./cut_rc.sh --replace  
-# Creates: release/2.12.0-rc.8 (deletes rc.7)
-```
-
-#### Ready for Production
-```bash
-# All tests pass on release/2.12.0-rc.8
-./promote_rc.sh
-# Creates: v2.12.0 production tag
-# Cycle repeats with 2.13.0
-```
-
-### Hotfix Lifecycle Example
-
-#### Critical Bug in Production
-```bash
-# Production is on v2.11.0, main is ahead with 2.12.0-rc.5
-git checkout -b hotfix/critical-security-fix v2.11.0
-# Apply minimal fix
-# Update patch in package.json to 2.11.1
-git commit -am "fix: critical security vulnerability"
-git push origin hotfix/critical-security-fix
-```
-
-#### Release Hotfix
-```bash
-# Create hotfix RC
-./cut_rc.sh --base hotfix/critical-security-fix --version 2.11.1 --replace
-
-# Creates: release/2.11.1-rc.0
-
-# Promote immediately after testing
-./promote_rc.sh  
-# Creates: v2.11.1 (production deploys this)
-```
-
-#### Integrate Back to Main
-```bash
-# Create PR: hotfix/critical-security-fix → main
-# Team reviews and merges
-
-# Staging automatically picks up hotfix in next RC
-./cut_rc.sh --replace
-# Creates: release/2.12.0-rc.6 (includes hotfix + ongoing features)
-```
-
-### Using status_rc.sh for Decision Making
-
-```bash  
-# Check current state before any action
-./status_rc.sh --commits
-
-# Example output guides next steps:
-# Latest Production: v2.11.0
-# Active RC: release/2.12.0-rc.5  
-# Commits since v2.11.0: 25 commits
-# Recommendation: Test RC or continue development
-```
-
----
-
-
-
-## Troubleshooting
-
-### Common Issues
-
-**Working Tree Not Clean**
-```bash
-# Error: working tree not clean
-git status
-git stash  # or commit your changes
-```
-
-**Tag Already Exists**  
-```bash
-# Error: tag vX.Y.Z already exists
-# Could be a failed promotion or the version was already released
-
-# If promotion failed, delete the tag and retry:
-git tag -d v2.10.0                    # delete local tag
-git push origin :refs/tags/v2.10.0    # delete remote tag
-# Fix any issues in RC, then re-run:
-./promote_rc.sh
-
-# If version was already released, continue RC train or start new version:
-./cut_rc.sh --replace  # continue current train
-# or 
-./cut_rc.sh --version X.Y.Z+1 --replace  # start new version
-```
-
-**Wrong Branch for Promotion**
-```bash
-# Error: branch 'xxx' must match pattern: release/X.Y.Z-rc.N  
-git checkout release/2.12.0-rc.8  # switch to correct RC branch
-./promote_rc.sh
-```
-
-### Recovery Commands
-
-**Undo RC Branch (if not yet promoted)**
-```bash
-git push origin :release/X.Y.Z-rc.N  # delete remote branch
-git branch -D release/X.Y.Z-rc.N     # delete local branch
-```
-
-**Undo Production Tag (⚠️ coordinate with team first)**
-```bash
-git push origin :refs/tags/vX.Y.Z    # delete remote tag  
-git tag -d vX.Y.Z                    # delete local tag
-```
-
-**Check Current State**
-```bash
-./status_rc.sh --commits              # see what's ready for release
-git tag -l 'v*' --sort=-version:refname | head -5  # recent production tags
-```
-
-### Best Practices
-
-- Always use `--dry-run` first when learning the scripts
-- Use `./status_rc.sh` before taking any action
-- Coordinate with team - only one person should manage releases at a time  
-- Use `--replace` to keep branch history clean
-- Test RCs thoroughly before promoting to production
-
----
-
+This dual-perspective approach ensures that feature development velocity is maintained while providing the release management oversight necessary for stable, predictable deployments.
