@@ -201,7 +201,6 @@ if [[ -z "${RC_BRANCHES}" ]]; then
         echo "     # Runs a dry run to preview creating: release/X.Y.Z-rc.1 based on current package.json version"
         echo "   → ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace"
         echo "     # Creates: release/X.Y.Z-rc.1 based on current package.json version"
-        echo "   → (use --commits to see if there are new commits since last release)"
       else
         echo "   → No new commits since last release. No action needed."
       fi
