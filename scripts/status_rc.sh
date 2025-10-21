@@ -197,14 +197,16 @@ if [[ -z "${RC_BRANCHES}" ]]; then
     if $SHOW_COMMITS; then
       COMMIT_COUNT="$(git rev-list --count "${LATEST_TAG}..${REMOTE}/main" 2>/dev/null || echo "0")"
       if [[ "${COMMIT_COUNT}" -gt 0 ]]; then
-        echo "   → Start a new RC train with: ./cut_rc.sh --version 2.2.0-rc.0 --replace"
-        echo "     (or --bump minor/major depending on changes)"
+        echo "   → ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace"
+        echo "     # Creates: release/X.Y.Z-rc.0 based on current package.json version"
+        echo "   → (use --commits to see if there are new commits since last release)"
       else
         echo "   → No new commits since last release. No action needed."
       fi
     else
-      echo "   → → Start a new RC train with: ./cut_rc.sh --version 2.2.0-rc.0 --replace"
-      echo "     (run with --commits to see changes since last release)"
+      echo "   → ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace"
+      echo "     # Creates: release/X.Y.Z-rc.0 based on current package.json version"
+      echo "   → (use --commits to see if there are new commits since last release)"
     fi
   else
     echo "   → No production releases yet. Start first RC: ./cut_rc.sh --bump minor --replace"
