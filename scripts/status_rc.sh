@@ -197,13 +197,13 @@ if [[ -z "${RC_BRANCHES}" ]]; then
     if $SHOW_COMMITS; then
       COMMIT_COUNT="$(git rev-list --count "${LATEST_TAG}..${REMOTE}/main" 2>/dev/null || echo "0")"
       if [[ "${COMMIT_COUNT}" -gt 0 ]]; then
-        echo "   → Start a new RC train with: ./cut_rc.sh --bump patch --replace"
+        echo "   → Start a new RC train with: ./cut_rc.sh --version 2.2.0-rc.0 --replace"
         echo "     (or --bump minor/major depending on changes)"
       else
         echo "   → No new commits since last release. No action needed."
       fi
     else
-      echo "   → Start a new RC train with: ./cut_rc.sh --bump patch --replace"
+      echo "   → → Start a new RC train with: ./cut_rc.sh --version 2.2.0-rc.0 --replace"
       echo "     (run with --commits to see changes since last release)"
     fi
   else

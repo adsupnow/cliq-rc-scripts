@@ -45,8 +45,10 @@ Options:
 
 Examples:
   # Start a new Dev cycle after a Prod release (creates rc.0):
-  ./cut_rc.sh --bump patch --replace
-  # Creates: release/2.0.21-rc.0
+  ./cut_rc.sh --version 2.2.0-rc.0 --replace
+  # Creates: release/2.2.0-rc.0
+  ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace
+  # Creates: release/X.Y.Z-rc.0 based on current package.json version
 
   # Continue current train (increments RC number):
   ./cut_rc.sh --replace
@@ -55,8 +57,6 @@ Examples:
   # Dry run to preview changes:
   ./cut_rc.sh --replace --dry-run
 
-  # Force target version AND update package.json (because --bump is also used):
-  ./mac_cut_rc.sh --version 2.3.0 --bump minor --replace
 EOF
 }
 
