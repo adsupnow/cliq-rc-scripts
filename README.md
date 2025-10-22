@@ -1,14 +1,6 @@
 # RC Release Management
 
-This document provides two perspectives on    %% Hotfix Path  
-    ReleaseType -->|Hotfix| CutHotfix[⚡ Cut hotfix branch from prod tag<br/>git checkout -b hotfix/fix v2.3.0]
-    CutHotfix --> WriteCode[💻 Write code to fix issue<br/>Minimal change only]
-    WriteCode --> BumpPatch[📦 Bump patch in package.json<br/>2.3.0 → 2.3.1]
-    BumpPatch --> CreateTag[🏷️ Tag & create GitHub Release<br/>git tag v2.3.1 && gh release create]
-    CreateTag --> ProdDeploys[🚀 Production deploys hotfix<br/>Automatic deployment]
-    ProdDeploys --> MergeHotfix[🔀 Merge hotfix to main via PR<br/>Integration with ongoing dev]
-    MergeHotfix --> HotfixComplete[✅ Hotfix in next RC<br/>Staging continues RC train]
-    HotfixComplete --> Start(Release Candidate) lifecycle: the **Developer's perspective** focusing on feature development and collaboration, and the **Release Engineer's perspective** focusing on version management and deployment orchestration.
+This document provides two perspectives on the RC (Release Candidate) lifecycle: the **Developer's perspective** focusing on feature development and collaboration, and the **Release Engineer's perspective** focusing on version management and deployment orchestration.
 
 ## Table of Contents
 - [Developer's Perspective](#developers-perspective)
