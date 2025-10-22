@@ -4,10 +4,10 @@ set -euo pipefail
 # status_rc.sh
 #
 # Display current release management state including:
-#   - Latest production release
-#   - Active RC branches
+#   - Latest production release tag (vX.Y.Z)
+#   - Active RC branches (release/X.Y.Z-rc.N)
 #   - Commits since last release
-#   - Recommended next action
+#   - Recommended next action (cut_rc.sh or promote_rc.sh)
 #
 # See `./status_rc.sh --help` for usage.
 
@@ -22,9 +22,15 @@ Usage: ./status_rc.sh [options]
 
 Display the current state of release management.
 
+Shows:
+  - Latest production release tag (vX.Y.Z)
+  - Active RC branches (release/X.Y.Z-rc.N)
+  - Commits since last release (optional)
+  - Recommended next action based on current state
+
 Options:
   --remote <name>    Remote to check (default: origin)
-  --verbose          Show additional details
+  --verbose          Show additional details (author, commits ahead)
   --commits          Show commits since last release
   --max <n>          Max commits to show (default: 10)
   --help             Show this help message and exit
@@ -33,11 +39,15 @@ Examples:
   # Show basic status:
   ./status_rc.sh
 
-  # Show status with commits since last release:
+  # Show status with recent commits:
   ./status_rc.sh --commits
 
   # Verbose mode with more details:
   ./status_rc.sh --verbose --commits --max 20
+
+Workflow Integration:
+  - Use this to check state before running cut_rc.sh or promote_rc.sh
+  - Recommendations align with simplified cut_rc.sh and promote_rc.sh options
 EOF
 }
 
@@ -197,21 +207,26 @@ if [[ -z "${RC_BRANCHES}" ]]; then
     if $SHOW_COMMITS; then
       COMMIT_COUNT="$(git rev-list --count "${LATEST_TAG}..${REMOTE}/main" 2>/dev/null || echo "0")"
       if [[ "${COMMIT_COUNT}" -gt 0 ]]; then
-        echo "   → ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace --dry-run"
-        echo "     # Runs a dry run to preview creating: release/X.Y.Z-rc.1 based on current package.json version"
-        echo "   → ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace"
-        echo "     # Creates: release/X.Y.Z-rc.1 based on current package.json version"
+        echo "   → Start new RC train (preview changes):"
+        echo "     ./cut_rc.sh --version \$(node -p \"require('./package.json').version\") --replace --dry-run"
+        echo ""
+        echo "   → Start new RC train (creates release/X.Y.Z-rc.0):"
+        echo "     ./cut_rc.sh --version \$(node -p \"require('./package.json').version\") --replace"
       else
         echo "   → No new commits since last release. No action needed."
       fi
     else
-        echo "   → ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace --dry-run"
-        echo "     # Runs a dry run to preview creating: release/X.Y.Z-rc.1 based on current package.json version"
-        echo "   → ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace"
-        echo "     # Creates: release/X.Y.Z-rc.1 based on current package.json version"
+      echo "   → Check if there are commits to release: ./status_rc.sh --commits"
+      echo ""
+      echo "   → Start new RC train (preview changes):"
+      echo "     ./cut_rc.sh --version \$(node -p \"require('./package.json').version\") --replace --dry-run"
+      echo ""
+      echo "   → Start new RC train (creates release/X.Y.Z-rc.0):"
+      echo "     ./cut_rc.sh --version \$(node -p \"require('./package.json').version\") --replace"
     fi
   else
-    echo "   → No production releases yet. Start first RC: ./cut_rc.sh --bump minor --replace"
+    echo "   → No production releases yet. Initialize version in package.json and create first RC:"
+    echo "     ./cut_rc.sh --version 1.0.0 --replace"
   fi
 else
   # Active RCs exist - find highest version and RC
@@ -225,15 +240,21 @@ else
     fi
   done <<< "${RC_LIST}"
   
-  if (( HIGHEST_RC > 0 )); then
+  if (( HIGHEST_RC >= 0 )); then
     HIGHEST_BRANCH="release/${HIGHEST_VERSION}-rc.${HIGHEST_RC}"
-    echo "   → Test ${HIGHEST_BRANCH}"
-    echo "   → If tests pass: ./promote_rc.sh --rc ${HIGHEST_BRANCH}"
-    echo "   → If fixes needed: commit to main, then ./cut_rc.sh --replace"
+    echo "   → Test ${HIGHEST_BRANCH} in staging environment"
+    echo ""
+    echo "   → If tests pass, promote to production:"
+    echo "     ./promote_rc.sh --rc ${HIGHEST_BRANCH}"
+    echo "     # Creates tag v${HIGHEST_VERSION} and GitHub Release (triggers prod deployment)"
+    echo ""
+    echo "   → If fixes needed, commit changes to main, then advance RC:"
+    echo "     ./cut_rc.sh --replace"
+    echo "     # Creates ${HIGHEST_BRANCH%.*}.$((HIGHEST_RC + 1)) and deletes ${HIGHEST_BRANCH}"
   fi
 fi
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════════════════════╗"
-echo "║ For more help, see: docs/rc-branching-scripts.md                     ║"
+echo "║ For more details, see: docs/rc-release-scripts.md                    ║"
 echo "╚═══════════════════════════════════════════════════════════════════════╝"

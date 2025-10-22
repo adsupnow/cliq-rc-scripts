@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# mac_cut_rc.sh
+# cut_rc.sh
 #
-# See `./mac_cut_rc.sh --help` for usage and examples.
+# See `./cut_rc.sh --help` for usage and examples.
 
 REMOTE="origin"
 BASE_REF="origin/main"
 DRY_RUN=false
-BUMP_KIND=""         # "", "patch", "minor", or "major"
 FORCED_VERSION=""
 REPLACE_PREV=false
-
-PKG_PATH="package.json"
-COMMIT_PKG=true
 
 print_help() {
   cat <<'EOF'
@@ -24,35 +20,27 @@ Cut or advance a release-candidate (RC) branch.
 Default behavior:
   - If an active RC train exists (e.g., release/2.0.20-rc.2), continues it -> release/2.0.20-rc.3
   - Else, if no active train exists, starts a new train from the latest Production release tag
-  - If you pass --bump (patch|minor|major): explicitly start a new train AND update package.json to plain X.Y.Z (no -rc)
+  - Always branches from origin/main
 
 RC Numbering:
-  - New trains start at rc.0 (e.g., release/2.0.20-rc.0) when using --bump
   - Continued trains increment (rc.0 -> rc.1 -> rc.2, etc.)
   - rc.0 = "Initial RC for this version"
   - rc.1+ = "Iteration with fixes/changes"
 
 Options:
-  --bump patch|minor|major   Start a new train (Prod release bump) AND update package.json on the RC branch to X.Y.Z
-  --version X.Y.Z            Force target version (advanced). Does NOT update package.json unless --bump is also used
-  --base <ref>               Base ref for cutting RC (default: origin/main)
-  --replace                  After creating new RC, delete previous RC branch for that same version
-  --keep-prev                Do not delete previous RC (default)
-  --pkg <path>               package.json path (default: package.json) used ONLY when --bump is present
-  --no-commit                Do not commit the package.json change (default commits)
+  --version X.Y.Z            Force specific version (e.g., from package.json)
+  --replace                  After creating new RC, delete previous RC branch
   --dry-run                  Print actions without changing anything
   --help                     Show this help message and exit
 
 Examples:
-  # Start a new Dev cycle after a Prod release (creates rc.0):
-  ./cut_rc.sh --version 2.2.0-rc.0 --replace
-  # Creates: release/2.2.0-rc.0
-  ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace
-  # Creates: release/X.Y.Z-rc.0 based on current package.json version
-
-  # Continue current train (increments RC number):
+  # Continue current RC train (increments RC number):
   ./cut_rc.sh --replace
-  # Creates: release/2.0.21-rc.1, then rc.2, etc.
+  # Creates: release/2.0.20-rc.1, then rc.2, etc.
+
+  # Start new RC train after production release (main already bumped to 2.12.0):
+  ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace
+  # Creates: release/2.12.0-rc.0
 
   # Dry run to preview changes:
   ./cut_rc.sh --replace --dry-run
@@ -66,40 +54,19 @@ need awk
 need sed
 need grep
 need sort
-need node
 
 # --- Parse args ---
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help) print_help; exit 0;;
-    --bump)        BUMP_KIND="${2:?patch|minor|major}"; shift 2;;
     --version)     FORCED_VERSION="${2:?X.Y.Z}"; shift 2;;
-    --base)        BASE_REF="${2:?ref}"; shift 2;;
     --replace)     REPLACE_PREV=true; shift;;
-    --keep-prev)   REPLACE_PREV=false; shift;;
-    --pkg)         PKG_PATH="${2:?path}"; shift 2;;
-    --no-commit)   COMMIT_PKG=false; shift;;
     --dry-run)     DRY_RUN=true; shift;;
-    --retire-prev) echo "NOTE: --retire-prev is deprecated; use --replace" >&2; REPLACE_PREV=true; shift;;
-    *) echo "Unknown arg: $1" >&2; echo "Run ./mac_cut_rc.sh --help for usage."; exit 2;;
+    *) echo "Unknown arg: $1" >&2; echo "Run ./cut_rc.sh --help for usage."; exit 2;;
   esac
 done
 
 semver_ok() { [[ "$1" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; }
-
-bump_semver() {
-  local ver="$1" kind="${2:-patch}"
-  semver_ok "${ver}" || { echo "bad semver: ${ver}" >&2; return 1; }
-  local major minor patch
-  IFS='.' read -r major minor patch <<< "${ver}"
-  case "${kind}" in
-    patch) patch=$((patch+1));;
-    minor) minor=$((minor+1)); patch=0;;
-    major) major=$((major+1)); minor=0; patch=0;;
-    *) echo "bad bump kind: ${kind}" >&2; return 1;;
-  esac
-  echo "${major}.${minor}.${patch}"
-}
 
 git_safe() {
   if $DRY_RUN; then
@@ -153,46 +120,27 @@ if [[ -n "${RC_HEADS}" ]]; then
     | tail -n1)"
 fi
 
-# --- Decide TARGET_VERSION and whether this is a "new train" ---
-IS_NEW_TRAIN=false
+# --- Decide TARGET_VERSION ---
 TARGET_VERSION=""
 
 if [[ -n "${FORCED_VERSION}" ]]; then
   semver_ok "${FORCED_VERSION}" || { echo "ERROR: --version must be X.Y.Z" >&2; exit 1; }
   TARGET_VERSION="${FORCED_VERSION}"
-  # NOTE: Only --bump triggers package.json update. Forcing a version alone will NOT update package.json.
-  # You can combine: --version X.Y.Z --bump patch|minor|major to force version AND update package.json.
-
-elif [[ -n "${BUMP_KIND}" ]]; then
-  # Explicit "start a new train" with bump (also triggers package.json update).
-  TARGET_VERSION="$(bump_semver "${PROD_VER}" "${BUMP_KIND}")"
-  IS_NEW_TRAIN=true
-
 elif [[ -n "${ACTIVE_RC_VER}" ]]; then
   # Continue the existing train.
   TARGET_VERSION="${ACTIVE_RC_VER}"
-
 else
-  # No active RC and no --bump: start a new PATCH train by default (no package.json update).
-  TARGET_VERSION="$(bump_semver "${PROD_VER}" "patch")"
-  IS_NEW_TRAIN=false
+  echo "ERROR: No active RC train found. Use --version X.Y.Z to specify version." >&2
+  exit 1
 fi
 
-echo "==> Latest Prod release: ${LATEST_TAG:-<none>} | Active RC: ${ACTIVE_RC_VER:-<none>} | Target: ${TARGET_VERSION} | New train: ${IS_NEW_TRAIN}"
+echo "==> Latest Prod release: ${LATEST_TAG:-<none>} | Active RC: ${ACTIVE_RC_VER:-<none>} | Target: ${TARGET_VERSION}"
 
 # --- Determine next RC number for TARGET_VERSION & previous RC branch (for --replace) ---
 PATTERN="release/${TARGET_VERSION}-rc."
 RC_LIST_FOR_TARGET="$(git ls-remote --heads "${REMOTE}" "${PATTERN}*" || true)"
 
-# Decide starting RC number based on whether this is a new train
-if [[ "${IS_NEW_TRAIN}" == "true" ]]; then
-  # New train starts at rc.0
-  NEXT_RC=0
-else
-  # Continuing train starts at rc.1 (or increments from existing)
-  NEXT_RC=1
-fi
-
+NEXT_RC=0
 PREV_BRANCH=""
 if [[ -n "${RC_LIST_FOR_TARGET}" ]]; then
   MAX_N=-1
@@ -217,79 +165,13 @@ NEW_BRANCH="release/${TARGET_VERSION}-rc.${NEXT_RC}"
 echo "==> Creating ${NEW_BRANCH} from ${BASE_REF}"
 git_safe checkout -q -B "${NEW_BRANCH}" "${BASE_REF}"
 
-# --- If this is a NEW TRAIN triggered by --bump, update package.json to plain X.Y.Z on the RC branch ---
-maybe_update_pkg_for_new_train() {
-  local version_to_write="$1" # X.Y.Z (no rc)
-  local pkg="${PKG_PATH}"
-
-  if [[ "${IS_NEW_TRAIN}" != "true" || "${NEXT_RC}" -ne 0 ]]; then
-    return 0
-  fi
-
-  if [[ ! -f "${pkg}" ]]; then
-    echo "WARNING: package.json not found at '${pkg}'. Skipping update."
-    return 0
-  fi
-
-  echo "==> Updating ${pkg} version -> ${version_to_write}"
-  local node_script="
-    const fs = require('fs');
-    const p = '${pkg}'.replace(/\\\\/g, '/');
-    const j = JSON.parse(fs.readFileSync(p, 'utf8'));
-    j.version = '${version_to_write}';
-    fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\\n');
-  "
-  if $DRY_RUN; then
-    echo '(dry-run) node -e "<edit package.json>"'
-  else
-    node -e "${node_script}"
-  fi
-
-  if $COMMIT_PKG; then
-    echo "==> Committing ${pkg} change"
-    git_safe add "${pkg}"
-    git_safe commit -m "chore(version): set ${pkg} to ${version_to_write} (start new train)"
-  else
-    echo "NOTE: --no-commit used: ${pkg} modified but not committed."
-  fi
-}
-
-maybe_update_pkg_for_new_train "${TARGET_VERSION}"
-
-# --- Push the RC branch (includes any pkg commit if made) ---
+# --- Push the RC branch ---
 git_safe push -u "${REMOTE}" "${NEW_BRANCH}"
 
 # --- Optionally delete previous RC branch ---
-if ${REPLACE_PREV}; then
-  # If this is a new train, delete the old active RC branch
-  if [[ "${IS_NEW_TRAIN}" == "true" && -n "${ACTIVE_RC_VER}" ]]; then
-    # Find the latest RC branch for the old active version
-    OLD_RC_PATTERN="release/${ACTIVE_RC_VER}-rc."
-    OLD_RC_LIST="$(git ls-remote --heads "${REMOTE}" "${OLD_RC_PATTERN}*" || true)"
-    
-    if [[ -n "${OLD_RC_LIST}" ]]; then
-      OLD_MAX_N=-1
-      OLD_PREV_BRANCH=""
-      while read -r _sha _ref; do
-        name="${_ref#refs/heads/}"   # release/X.Y.Z-rc.N
-        n="${name##*.}"              # N
-        [[ "${n}" =~ ^[0-9]+$ ]] || continue
-        if (( n > OLD_MAX_N )); then
-          OLD_MAX_N="${n}"
-          OLD_PREV_BRANCH="${name}"
-        fi
-      done <<< "${OLD_RC_LIST}"
-      
-      if [[ -n "${OLD_PREV_BRANCH}" ]]; then
-        echo "==> Deleting previous RC on remote: ${OLD_PREV_BRANCH}"
-        git_safe push "${REMOTE}" ":${OLD_PREV_BRANCH}"
-      fi
-    fi
-  # If continuing same train, delete previous RC for same version
-  elif [[ -n "${PREV_BRANCH}" ]]; then
-    echo "==> Deleting previous RC on remote: ${PREV_BRANCH}"
-    git_safe push "${REMOTE}" ":${PREV_BRANCH}"
-  fi
+if ${REPLACE_PREV} && [[ -n "${PREV_BRANCH}" ]]; then
+  echo "==> Deleting previous RC on remote: ${PREV_BRANCH}"
+  git_safe push "${REMOTE}" ":${PREV_BRANCH}"
 fi
 
 echo "==> Done. RC branch is ${NEW_BRANCH}"

@@ -11,11 +11,6 @@ set -euo pipefail
 #   - Pushes the tag to the remote (defaults to 'origin')
 #   - Creates and publishes a GitHub Release (triggers deployment workflows)
 #
-# Optional:
-#   - --update-pkg: Set package.json "version" to X.Y.Z on the RC branch before tagging (off by default)
-#   - --pkg <path>: Path to package.json (default: package.json)
-#   - --no-commit:  Do not commit package.json change
-#
 # Requirements:
 #   - GitHub CLI (gh) must be installed and authenticated
 #
@@ -25,9 +20,6 @@ REMOTE="origin"
 DRY_RUN=false
 RC_BRANCH=""          # if empty, deduce from current branch
 TAG_MESSAGE=""        # optional tag message
-UPDATE_PKG=false
-PKG_PATH="package.json"
-COMMIT_PKG=true
 
 print_help() {
   cat <<'EOF'
@@ -51,11 +43,6 @@ Options:
   --remote <name>        Remote to push tags to (default: origin)
   --dry-run              Print actions without changing anything
 
-Package.json options (optional):
-  --update-pkg           Update package.json "version" to X.Y.Z on the RC branch before tagging
-  --pkg <path>           Path to package.json (default: package.json)
-  --no-commit            Do not commit the package.json change
-
 Examples:
   # Promote the latest RC branch to prod (auto-detects highest version):
   ./promote_rc.sh
@@ -65,9 +52,6 @@ Examples:
 
   # Promote and add a custom tag message:
   ./promote_rc.sh --message "Prod release 2.0.20"
-
-  # Promote and also update package.json on the RC branch to 2.0.20:
-  ./promote_rc.sh --update-pkg
 
   # Dry run (no changes):
   ./promote_rc.sh --dry-run
@@ -79,7 +63,6 @@ need git
 need awk
 need grep
 need sed
-need node
 
 # Check for GitHub CLI with helpful error message
 if ! command -v gh &> /dev/null; then
@@ -123,9 +106,6 @@ while [[ $# -gt 0 ]]; do
     --message) TAG_MESSAGE="${2:?text}"; shift 2;;
     --remote) REMOTE="${2:?name}"; shift 2;;
     --dry-run) DRY_RUN=true; shift;;
-    --update-pkg) UPDATE_PKG=true; shift;;
-    --pkg) PKG_PATH="${2:?path}"; shift 2;;
-    --no-commit) COMMIT_PKG=false; shift;;
     *) echo "Unknown arg: $1" >&2; echo "Run ./promote_rc.sh --help for usage."; exit 2;;
   esac
 done
@@ -201,35 +181,6 @@ git_safe pull --ff-only
 if git ls-remote --tags "${REMOTE}" | awk '{print $2}' | grep -qx "refs/tags/${TAG}"; then
   echo "ERROR: tag ${TAG} already exists on ${REMOTE}" >&2
   exit 1
-fi
-
-# Optional: update package.json on this RC branch to X.Y.Z
-if $UPDATE_PKG; then
-  if [[ ! -f "${PKG_PATH}" ]]; then
-    echo "WARNING: --update-pkg specified but '${PKG_PATH}' not found. Skipping package.json update."
-  else
-    echo "==> Updating ${PKG_PATH} version -> ${VERSION}"
-    NODE_SCRIPT="
-      const fs = require('fs');
-      const p = '${PKG_PATH}'.replace(/\\\\/g, '/');
-      const j = JSON.parse(fs.readFileSync(p, 'utf8'));
-      j.version = '${VERSION}';
-      fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\\n');
-    "
-    if $DRY_RUN; then
-      echo '(dry-run) node -e "<edit package.json>"'
-    else
-      node -e "${NODE_SCRIPT}"
-    fi
-
-    if $COMMIT_PKG; then
-      echo "==> Committing ${PKG_PATH} change"
-      git_safe add "${PKG_PATH}"
-      git_safe commit -m "chore(version): set ${PKG_PATH} to ${VERSION} (promote to Prod)"
-    else
-      echo "NOTE: --no-commit used: ${PKG_PATH} modified but not committed."
-    fi
-  fi
 fi
 
 # Create annotated tag

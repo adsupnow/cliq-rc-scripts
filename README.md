@@ -1,6 +1,14 @@
 # RC Release Management
 
-This document provides two perspectives on the RC (Release Candidate) lifecycle: the **Developer's perspective** focusing on feature development and collaboration, and the **Release Engineer's perspective** focusing on version management and deployment orchestration.
+This document provides two perspectives on    %% Hotfix Path  
+    ReleaseType -->|Hotfix| CutHotfix[⚡ Cut hotfix branch from prod tag<br/>git checkout -b hotfix/fix v2.3.0]
+    CutHotfix --> WriteCode[💻 Write code to fix issue<br/>Minimal change only]
+    WriteCode --> BumpPatch[📦 Bump patch in package.json<br/>2.3.0 → 2.3.1]
+    BumpPatch --> CreateTag[🏷️ Tag & create GitHub Release<br/>git tag v2.3.1 && gh release create]
+    CreateTag --> ProdDeploys[🚀 Production deploys hotfix<br/>Automatic deployment]
+    ProdDeploys --> MergeHotfix[🔀 Merge hotfix to main via PR<br/>Integration with ongoing dev]
+    MergeHotfix --> HotfixComplete[✅ Hotfix in next RC<br/>Staging continues RC train]
+    HotfixComplete --> Start(Release Candidate) lifecycle: the **Developer's perspective** focusing on feature development and collaboration, and the **Release Engineer's perspective** focusing on version management and deployment orchestration.
 
 ## Table of Contents
 - [Developer's Perspective](#developers-perspective)
@@ -83,22 +91,32 @@ flowchart TD
     
     class Start startEndNode
     class PromoteRC,StartNewTrain,NormalComplete engineerNode
-    class CutHotfix,WriteCode,BumpPatch,CreateTag,MergeHotfix,HotfixComplete hotfixNode
+    class CutHotfix,WriteCode,BumpPatch,CreateTag,ProdDeploys,MergeHotfix,HotfixComplete hotfixNode
     class ReleaseType decisionNode
 ```
 
 ### Release Engineer's Workflows:
 
 #### **Normal Release**
-- **Promote latest RC**: `./promote_rc.sh`
-- **Start new RC train**: `cut_rc.sh --version $(node -p "require('./package.json').version") --replace`
+- **Promote latest RC**: `./promote_rc.sh` (creates tag and GitHub Release)
+- **Start new RC train**: Manual first RC after production release bumps version
+  ```bash
+  ./cut_rc.sh --version $(node -p "require('./package.json').version") --replace
+  ```
+- **Automated RC progression**: Staging workflow auto-runs `cut_rc.sh --replace` on main merges
 
 #### **Hotfix Release**
-- **Cut hotfix branch from prod tag**: Manual branch creation
+- **Cut hotfix branch from prod tag**: `git checkout -b hotfix/fix v2.3.0`
 - **Write code to fix issue**: Minimal changes only
 - **Bump patch in package.json**: `2.3.0 → 2.3.1`
-- **Create new tag and publish**: Manual tag creation
-- **Merge hotfix branch into main**: Directly merge or Integration via PR
+- **Tag and create GitHub Release**: 
+  ```bash
+  git tag -a v2.3.1 -m "Hotfix: description"
+  git push origin v2.3.1
+  gh release create v2.3.1 --title "Hotfix v2.3.1" --notes "Critical fix"
+  ```
+- **Merge hotfix to main via PR**: Integrates with ongoing development
+- **Hotfix auto-included in next RC**: Staging workflow continues RC train after main merge
 
 ---
 
@@ -117,9 +135,10 @@ The two perspectives intersect at critical points:
 
 ### 🔄 **Automated Handoffs**
 
-- **PR Merge → RC Creation**: Developer merges trigger automatic RC progression
-- **Production Deploy → Version Bump**: Production deployment triggers next cycle setup
-- **Hotfix Tag → CI/CD**: Emergency deployments trigger automatic production workflows
+- **PR Merge → RC Creation**: Developer merges trigger automatic RC progression (staging workflow runs `cut_rc.sh --replace`)
+- **Production Deploy → Version Bump**: Production deployment triggers automatic version bump on main
+- **RC Branch Push → Staging Deploy**: New RC branches trigger automatic staging builds and deployments
+- **Hotfix Tag → Production Deploy**: Emergency hotfix tags trigger automatic production workflows
 
 ### 📊 **Shared Responsibilities**
 

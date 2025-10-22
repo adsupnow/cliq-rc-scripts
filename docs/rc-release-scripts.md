@@ -27,20 +27,23 @@ This repository contains automated scripts for managing release candidates (RC) 
 
 ### 2. New Development Train Starts
 🔧 **Engineer runs**: `../cliq-rc-scripts/cut_rc.sh --version 2.12.0 --replace`  
-🔧 **Or similarly grabbing the latest/recent bumped version**: `../cliq-rc-scripts/cut_rc.sh --version $(node -p "require('./package.json').version") --replace`  
+🔧 **Or grab version from package.json**: `../cliq-rc-scripts/cut_rc.sh --version $(node -p "require('./package.json').version") --replace`  
 ✅ **New RC created**: `release/2.12.0-rc.0` (first staging snapshot)  
+✅ **Staging workflow triggered**: RC branch push triggers build and deploy  
 ✅ **Development begins**: Feature branches cut from main  
 
 ### 3. Active Development Phase
 👥 **Engineers create**: Feature branches from main (`feature/EN-1234-cool-thing`)  
 📝 **Work flows through**: PRs back to main  
-🔄 **Each main merge**: Triggers staging → continues RC train (`rc.0` → `rc.1` → `rc.2`...)  
+🔄 **Each main merge**: Triggers staging workflow → `cut_rc.sh --replace` (automatic)  
+📦 **RC train advances**: `rc.0` → `rc.1` → `rc.2`... (each deletes previous)  
 🧪 **Each RC deployment**: Tests the cumulative changes on staging  
 
 ### 4. Ready for Next Release
 ✅ **Latest RC**: Contains all merged features (e.g., `release/2.12.0-rc.8`)  
-🚀 **Engineer promotes**: `../cliq-rc-scripts/promote_rc.sh` → creates `v2.12.0` tag  
-🔄 **Cycle repeats**: Back to step 1 with `2.13.0`  
+🚀 **Engineer promotes**: `../cliq-rc-scripts/promote_rc.sh` → creates `v2.12.0` tag and GitHub Release  
+📦 **Production deployment**: Release triggers production workflow  
+🔄 **Cycle repeats**: Production workflow bumps main to `2.13.0`, ready for next development cycle  
 
 ---
 
@@ -59,9 +62,10 @@ This repository contains automated scripts for managing release candidates (RC) 
 📦 **Version bumped**: `package.json` → `2.11.1` (patch increment)  
 
 ### 3. Hotfix Release
-🏷️ **Tag created**: `v2.11.1` from hotfix branch  
+🏷️ **Tag created**: `v2.11.1` directly from hotfix branch (no RC process)  
+📦 **GitHub Release created**: Published via `gh release create` or GitHub UI  
 🚀 **Production deploys**: Hotfix goes live immediately  
-✅ **Production workflow**: Detects hotfix → deploys only (no RC train changes)  
+✅ **Production workflow**: Detects hotfix → deploys only (no main version bump)  
 
 ### 4. Integration Back to Main
 📝 **Engineer creates PR**: Merge `hotfix/critical-bug` → `main`  
@@ -80,13 +84,15 @@ This repository contains automated scripts for managing release candidates (RC) 
 ### Normal Development:
 - **Linear progression**: Each cycle builds on the last  
 - **Predictable**: Version bumps and RC creation follow pattern  
+- **Hybrid automation**: First RC after production release is manual, subsequent RCs are automatic via staging workflow  
 - **Collaborative**: Multiple features flow through main  
 
 ### Hotfix Process:
 - **Branch from production**: Not from main (which may be ahead)  
+- **Direct tagging**: Hotfix is tagged directly (v2.11.1) without RC process  
 - **Manual integration**: Visible via PR process for team awareness  
 - **Non-disruptive**: Doesn't interfere with ongoing development train  
-- **Eventually consistent**: Hotfix gets into next release automatically  
+- **Eventually consistent**: Hotfix gets into next release automatically when merged to main  
 
 ---
 
@@ -219,25 +225,28 @@ chmod +x ../cliq-rc-scripts/scripts/*.sh
 #### Starting New Development Cycle (After Production Release)
 ```bash
 # Production v2.11.0 was just released
-# Main gets bumped to 2.12.0 (automated)
+# Production workflow automatically bumps main to 2.12.0
+
+# Engineer manually creates first RC:
 ./cut_rc.sh --version 2.12.0 --replace
 # Creates: release/2.12.0-rc.0
+# Pushes to remote → staging workflow builds and deploys automatically
 ```
 
 #### Active Development Phase  
 ```bash
 # Engineer merges feature PR to main
-# Staging needs latest changes
-./cut_rc.sh --replace  
+# Staging workflow automatically runs: cut_rc.sh --replace
 # Creates: release/2.12.0-rc.1 (deletes rc.0)
+# Staging workflow builds and deploys automatically
 
-# Another feature merged
-./cut_rc.sh --replace
+# Another feature merged to main
+# Staging workflow automatically runs: cut_rc.sh --replace
 # Creates: release/2.12.0-rc.2 (deletes rc.1)
+# Staging workflow builds and deploys automatically
 
 # Continue until ready for production...
-./cut_rc.sh --replace  
-# Creates: release/2.12.0-rc.8 (deletes rc.7)
+# Latest RC: release/2.12.0-rc.8
 ```
 
 #### Ready for Production
@@ -245,7 +254,9 @@ chmod +x ../cliq-rc-scripts/scripts/*.sh
 # All tests pass on release/2.12.0-rc.8
 ./promote_rc.sh
 # Creates: v2.12.0 production tag
-# Cycle repeats with 2.13.0
+# Publishes GitHub Release
+# Production workflow deploys and bumps main to 2.13.0
+# Cycle repeats with next development train
 ```
 
 ### Hotfix Lifecycle Example
@@ -260,16 +271,17 @@ git commit -am "fix: critical security vulnerability"
 git push origin hotfix/critical-security-fix
 ```
 
-#### Release Hotfix
+#### Release Hotfix Directly
 ```bash
-# Create hotfix RC
-./cut_rc.sh --base hotfix/critical-security-fix --version 2.11.1 --replace
+# Tag the hotfix directly (no RC process for hotfixes)
+git tag -a v2.11.1 -m "Hotfix: critical security vulnerability"
+git push origin v2.11.1
 
-# Creates: release/2.11.1-rc.0
+# Create GitHub Release (triggers production deployment)
+gh release create v2.11.1 --title "Hotfix v2.11.1" --notes "Critical security vulnerability fix"
+# OR create release via GitHub UI
 
-# Promote immediately after testing
-./promote_rc.sh  
-# Creates: v2.11.1 (production deploys this)
+# Production workflow detects hotfix (v2.11.1 < v2.12.0 on main) and deploys without bumping main
 ```
 
 #### Integrate Back to Main
@@ -278,7 +290,7 @@ git push origin hotfix/critical-security-fix
 # Team reviews and merges
 
 # Staging automatically picks up hotfix in next RC
-./cut_rc.sh --replace
+# (CI/CD runs cut_rc.sh --replace after main merge)
 # Creates: release/2.12.0-rc.6 (includes hotfix + ongoing features)
 ```
 

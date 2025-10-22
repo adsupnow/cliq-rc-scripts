@@ -12,7 +12,8 @@ flowchart TD
     ApplyFix --> BumpVersion[📦 Version bumped:<br/>package.json → 2.11.1]
     
     BumpVersion --> CreateTag[🏷️ Tag created:<br/>v2.11.1 from hotfix branch]
-    CreateTag --> ProdDeploy[🚀 Production deploys:<br/>Hotfix goes live immediately]
+    CreateTag --> CreateRelease[📦 Create GitHub Release:<br/>Publishes v2.11.1]
+    CreateRelease --> ProdDeploy[🚀 Production deploys:<br/>Hotfix goes live immediately]
     ProdDeploy --> ProdWorkflow[✅ Production workflow:<br/>Detects hotfix → deploys only]
     
     ProdWorkflow --> CreatePR[📝 Engineer creates PR:<br/>hotfix/critical-bug → main]
@@ -51,7 +52,7 @@ flowchart TD
 
 ### 🚨 **Emergency Response**
 - **Branch from production**: Not from main (which may be ahead with unreleased features)
-- **Immediate deployment**: Hotfix goes live as soon as it's tagged and tested
+- **Immediate deployment**: Hotfix tagged directly (v2.11.1) and deployed without RC process
 - **Minimal scope**: Only the essential fix, no additional features or changes
 
 ### 🔀 **Non-Disruptive Integration**
@@ -78,5 +79,6 @@ flowchart TD
 | **Scope** | Multiple features | Single critical fix |
 | **Timeline** | Planned release cycle | Emergency deployment |
 | **Integration** | Automatic via main | Manual via PR review |
-| **Testing** | Progressive RC testing | Immediate prod + later staging |
+| **Testing** | Progressive RC testing | Direct production deployment |
+| **Release Process** | RC → promote to tag | Direct tag creation (no RC) |
 | **Visibility** | Continuous in RC train | Explicit via PR process |
