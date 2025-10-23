@@ -29,7 +29,8 @@ RC Numbering:
 
 Options:
   --version X.Y.Z            Force specific version (e.g., from package.json)
-  --replace                  After creating new RC, delete previous RC branch
+  --replace                  After creating new RC, delete previous RC branch(es)
+                             When starting new version, also cleans up active RC train
   --dry-run                  Print actions without changing anything
   --help                     Show this help message and exit
 
@@ -168,10 +169,29 @@ git_safe checkout -q -B "${NEW_BRANCH}" "${BASE_REF}"
 # --- Push the RC branch ---
 git_safe push -u "${REMOTE}" "${NEW_BRANCH}"
 
-# --- Optionally delete previous RC branch ---
-if ${REPLACE_PREV} && [[ -n "${PREV_BRANCH}" ]]; then
-  echo "==> Deleting previous RC on remote: ${PREV_BRANCH}"
-  git_safe push "${REMOTE}" ":${PREV_BRANCH}"
+# --- Optionally delete previous RC branches ---
+if ${REPLACE_PREV}; then
+  # Delete previous RC branch for same version (if exists)
+  if [[ -n "${PREV_BRANCH}" ]]; then
+    echo "==> Deleting previous RC on remote: ${PREV_BRANCH}"
+    git_safe push "${REMOTE}" ":${PREV_BRANCH}"
+  fi
+  
+  # Delete active RC branches from different version (if --version was specified)
+  if [[ -n "${FORCED_VERSION}" ]] && [[ -n "${ACTIVE_RC_VER}" ]] && [[ "${ACTIVE_RC_VER}" != "${TARGET_VERSION}" ]]; then
+    echo "==> Starting new version ${TARGET_VERSION}, cleaning up active RC train for ${ACTIVE_RC_VER}"
+    ACTIVE_RC_BRANCHES="$(git ls-remote --heads "${REMOTE}" "release/${ACTIVE_RC_VER}-rc.*" \
+      | awk '{print $2}' \
+      | sed 's#refs/heads/##' || true)"
+    
+    if [[ -n "${ACTIVE_RC_BRANCHES}" ]]; then
+      while read -r branch; do
+        [[ -n "${branch}" ]] || continue
+        echo "==> Deleting active RC branch: ${branch}"
+        git_safe push "${REMOTE}" ":${branch}"
+      done <<< "${ACTIVE_RC_BRANCHES}"
+    fi
+  fi
 fi
 
 echo "==> Done. RC branch is ${NEW_BRANCH}"
