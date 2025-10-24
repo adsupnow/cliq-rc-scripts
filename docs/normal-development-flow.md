@@ -25,8 +25,8 @@ flowchart TD
     MoreDev -->|Yes| FeatureBranch
     MoreDev -->|No| ReadyForProd[✅ Latest RC contains<br/>all merged features<br/>e.g., release/2.12.0-rc.8]
     
-    ReadyForProd --> Promote[🚀 Engineer promotes:<br/>./promote_rc.sh]
-    Promote --> ProdTag[✅ Creates: v2.12.0 tag]
+    ReadyForProd --> Promote[🚀 Engineer promotes:<br/>./promote_rc.sh<br/>or ./promote_rc.sh --auto-next-rc]
+    Promote --> ProdTag[✅ Creates: v2.12.0 tag<br/>🆕 Auto-creates next RC train (if --auto-next-rc)]
     ProdTag --> CycleRepeat[🔄 Cycle repeats<br/>Back to step 1 with 2.13.0]
     CycleRepeat --> Start
     
@@ -67,3 +67,9 @@ flowchart TD
 - All stakeholders can see what's included in upcoming release
 - Version bumping happens at predictable cycle boundaries
 - No surprises about what's being released when
+
+### 🚀 **Streamlined Promotion** (New)
+- **Standard workflow**: `promote_rc.sh` creates production tag, manual next RC creation
+- **Automated workflow**: `promote_rc.sh --auto-next-rc` handles promotion + next RC train automatically
+- **Eliminates gaps**: No more forgetting to checkout main and create the next development cycle
+- **Seamless transitions**: From promotion completion directly to next development ready state

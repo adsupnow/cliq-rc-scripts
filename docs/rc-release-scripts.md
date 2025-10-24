@@ -41,9 +41,12 @@ This repository contains automated scripts for managing release candidates (RC) 
 
 ### 4. Ready for Next Release
 ✅ **Latest RC**: Contains all merged features (e.g., `release/2.12.0-rc.8`)  
-🚀 **Engineer promotes**: `../cliq-rc-scripts/promote_rc.sh` → creates `v2.12.0` tag and GitHub Release  
+🚀 **Engineer promotes**: 
+   - `../cliq-rc-scripts/promote_rc.sh` → creates `v2.12.0` tag and GitHub Release
+   - `../cliq-rc-scripts/promote_rc.sh --auto-next-rc` → promotes + automatically starts next RC train
 📦 **Production deployment**: Release triggers production workflow  
 🔄 **Cycle repeats**: Production workflow bumps main to `2.13.0`, ready for next development cycle  
+🆕 **Automatic continuation**: With `--auto-next-rc`, the next RC train (`release/2.13.0-rc.0`) is created automatically  
 
 ---
 
@@ -166,7 +169,7 @@ chmod +x ../cliq-rc-scripts/scripts/*.sh
 
 ### promote_rc.sh
 
-**Purpose**: Promotes a tested release candidate branch to a production release tag.
+**Purpose**: Promotes a tested release candidate branch to a production release tag, with optional automatic creation of the next RC train.
 
 **Usage**:
 ```bash
@@ -176,6 +179,7 @@ chmod +x ../cliq-rc-scripts/scripts/*.sh
 **Key Options**:
 - `--rc <branch>` - RC branch to promote (defaults to current branch)  
 - `--message "<text>"` - Custom annotated tag message  
+- `--auto-next-rc` - After promotion, automatically create next RC train from updated main branch
 - `--dry-run` - Preview actions without making changes  
 
 **Examples**:
@@ -188,7 +192,22 @@ chmod +x ../cliq-rc-scripts/scripts/*.sh
 
 # Promote with custom message
 ./promote_rc.sh --message "Release v2.12.0 - New features and bug fixes"
+
+# Promote and automatically create next RC train (streamlined workflow)
+./promote_rc.sh --auto-next-rc
+
+# Dry run with auto-next-rc to preview full workflow
+./promote_rc.sh --auto-next-rc --dry-run
 ```
+
+**Auto Next RC Feature**:
+When `--auto-next-rc` is used, the script will automatically:
+1. Checkout main branch and pull latest changes
+2. Read version from `package.json` 
+3. Run `cut_rc.sh --version $(node -p "require('./package.json').version") --replace`
+4. Create the new RC train (e.g., `release/X.Y.Z-rc.0`)
+
+This eliminates the manual step of switching branches and creating the next RC after promotion.
 
 ### status_rc.sh
 
@@ -252,11 +271,50 @@ chmod +x ../cliq-rc-scripts/scripts/*.sh
 #### Ready for Production
 ```bash
 # All tests pass on release/2.12.0-rc.8
+
+# Option 1: Standard promotion
 ./promote_rc.sh
 # Creates: v2.12.0 production tag
 # Publishes GitHub Release
 # Production workflow deploys and bumps main to 2.13.0
-# Cycle repeats with next development train
+# Engineer manually creates next RC train later
+
+# Option 2: Streamlined promotion (recommended)
+./promote_rc.sh --auto-next-rc
+# Creates: v2.12.0 production tag
+# Publishes GitHub Release
+# Production workflow deploys and bumps main to 2.13.0
+# Automatically creates: release/2.13.0-rc.0 (next development train ready)
+```
+
+### Promotion Workflow Comparison
+
+#### Traditional Workflow (Manual Next RC Creation)
+```bash
+# 1. Promote RC to production
+./promote_rc.sh
+# ✅ Creates v2.12.0 tag and GitHub Release
+# ✅ Production deploys and bumps main to 2.13.0
+
+# 2. Engineer manually starts next development cycle (later)
+git checkout main
+git pull origin main  # Get updated package.json with 2.13.0
+./cut_rc.sh --version $(node -p "require('./package.json').version") --replace
+# ✅ Creates release/2.13.0-rc.0
+
+# Problem: Manual step, easy to forget, workflow gap
+```
+
+#### Streamlined Workflow (Automatic Next RC Creation)
+```bash
+# Single command handles promotion + next RC train
+./promote_rc.sh --auto-next-rc
+# ✅ Creates v2.12.0 tag and GitHub Release
+# ✅ Production deploys and bumps main to 2.13.0
+# ✅ Automatically creates release/2.13.0-rc.0
+# ✅ Next development cycle immediately ready
+
+# Benefit: No manual steps, no workflow gaps, seamless transitions
 ```
 
 ### Hotfix Lifecycle Example

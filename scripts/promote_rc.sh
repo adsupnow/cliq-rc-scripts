@@ -10,9 +10,11 @@ set -euo pipefail
 #   - Creates an annotated tag vX.Y.Z from the RC branch HEAD
 #   - Pushes the tag to the remote (defaults to 'origin')
 #   - Creates and publishes a GitHub Release (triggers deployment workflows)
+#   - Optionally creates the next RC train automatically (--auto-next-rc)
 #
 # Requirements:
 #   - GitHub CLI (gh) must be installed and authenticated
+#   - Node.js (required only when using --auto-next-rc with package.json)
 #
 # See `./promote_rc.sh --help` for usage & examples.
 
@@ -20,6 +22,7 @@ REMOTE="origin"
 DRY_RUN=false
 RC_BRANCH=""          # if empty, deduce from current branch
 TAG_MESSAGE=""        # optional tag message
+AUTO_NEXT_RC=false    # automatically create next RC train after promotion
 
 print_help() {
   cat <<'EOF'
@@ -36,11 +39,15 @@ By default:
 
 Requirements:
   - GitHub CLI (gh) must be installed and authenticated
+  - Node.js (required only when using --auto-next-rc with package.json)
 
 Options:
   --rc <branch>          RC branch to promote (e.g., release/2.0.20-rc.3). If not provided, automatically finds the latest RC
   --message "<text>"     Annotated tag message (defaults to "Release vX.Y.Z")
   --remote <name>        Remote to push tags to (default: origin)
+  --auto-next-rc         After promotion, automatically create next RC train from updated main branch.
+                         This checkout main, pulls latest changes, reads version from package.json,
+                         and runs cut_rc.sh to create the new RC train (e.g., release/X.Y.Z-rc.0)
   --dry-run              Print actions without changing anything
 
 Examples:
@@ -52,6 +59,9 @@ Examples:
 
   # Promote and add a custom tag message:
   ./promote_rc.sh --message "Prod release 2.0.20"
+
+  # Promote and automatically create next RC train:
+  ./promote_rc.sh --auto-next-rc
 
   # Dry run (no changes):
   ./promote_rc.sh --dry-run
@@ -72,6 +82,14 @@ if ! command -v gh &> /dev/null; then
   echo "" >&2
   echo "On macOS: brew install gh" >&2
   echo "Then authenticate: gh auth login" >&2
+  exit 1
+fi
+
+# Check for Node.js if --auto-next-rc is enabled
+if $AUTO_NEXT_RC && ! command -v node &> /dev/null; then
+  echo "ERROR: Node.js is not installed" >&2
+  echo "The --auto-next-rc flag requires Node.js to read package.json" >&2
+  echo "Please install Node.js or run without --auto-next-rc" >&2
   exit 1
 fi
 
@@ -105,6 +123,7 @@ while [[ $# -gt 0 ]]; do
     --rc) RC_BRANCH="${2:?branch}"; shift 2;;
     --message) TAG_MESSAGE="${2:?text}"; shift 2;;
     --remote) REMOTE="${2:?name}"; shift 2;;
+    --auto-next-rc) AUTO_NEXT_RC=true; shift;;
     --dry-run) DRY_RUN=true; shift;;
     *) echo "Unknown arg: $1" >&2; echo "Run ./promote_rc.sh --help for usage."; exit 2;;
   esac
@@ -216,6 +235,54 @@ else
 fi
 
 echo "==> Done. Pushed ${TAG} to ${REMOTE} and published GitHub Release."
+
+# Automatically create next RC train if requested
+if $AUTO_NEXT_RC; then
+  echo ""
+  echo "==> Creating next RC train..."
+  
+  # Checkout main and pull to get updated package.json
+  echo "==> Switching to main branch and pulling latest changes..."
+  git_safe checkout main
+  git_safe pull "${REMOTE}" main
+  
+  # Check if package.json exists
+  if [[ ! -f "package.json" ]]; then
+    echo "WARNING: package.json not found in repository root" >&2
+    echo "Cannot automatically create next RC train" >&2
+  else
+    # Extract version from package.json
+    if $DRY_RUN; then
+      echo "(dry-run) NEXT_VERSION=\$(node -p \"require('./package.json').version\")"
+      NEXT_VERSION="X.Y.Z"  # placeholder for dry-run
+    else
+      NEXT_VERSION="$(node -p "require('./package.json').version")"
+    fi
+    
+    if [[ -z "${NEXT_VERSION}" ]]; then
+      echo "ERROR: Could not extract version from package.json" >&2
+    else
+      echo "==> Next version from package.json: ${NEXT_VERSION}"
+      
+      # Find the cut_rc.sh script relative to this script's location
+      SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      CUT_RC_SCRIPT="${SCRIPT_DIR}/cut_rc.sh"
+      
+      if [[ ! -f "${CUT_RC_SCRIPT}" ]]; then
+        echo "ERROR: cut_rc.sh not found at ${CUT_RC_SCRIPT}" >&2
+      else
+        echo "==> Running cut_rc.sh to create new RC train..."
+        if $DRY_RUN; then
+          echo "(dry-run) ${CUT_RC_SCRIPT} --version ${NEXT_VERSION} --replace"
+        else
+          "${CUT_RC_SCRIPT}" --version "${NEXT_VERSION}" --replace
+        fi
+        echo "==> Successfully created next RC train for version ${NEXT_VERSION}"
+      fi
+    fi
+  fi
+fi
+
 if $DRY_RUN; then
   echo "NOTE: run without --dry-run to apply changes."
 fi
