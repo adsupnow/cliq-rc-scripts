@@ -14,7 +14,6 @@ set -euo pipefail
 #
 # Requirements:
 #   - GitHub CLI (gh) must be installed and authenticated
-#   - Node.js (required only when using --auto-next-rc with package.json)
 #
 # See `./promote_rc.sh --help` for usage & examples.
 
@@ -39,15 +38,14 @@ By default:
 
 Requirements:
   - GitHub CLI (gh) must be installed and authenticated
-  - Node.js (required only when using --auto-next-rc with package.json)
 
 Options:
   --rc <branch>          RC branch to promote (e.g., release/2.0.20-rc.3). If not provided, automatically finds the latest RC
   --message "<text>"     Annotated tag message (defaults to "Release vX.Y.Z")
   --remote <name>        Remote to push tags to (default: origin)
-  --auto-next-rc         After promotion, automatically create next RC train from updated main branch.
-                         This checkout main, pulls latest changes, reads version from package.json,
-                         and runs cut_rc.sh to create the new RC train (e.g., release/X.Y.Z-rc.0)
+  --auto-next-rc         After promotion, automatically create next RC train for next development cycle.
+                         Calculates next version (X.Y.Z -> X.(Y+1).0) and runs cut_rc.sh to create
+                         the new RC train (e.g., release/2.6.0 -> release/2.7.0-rc.0)
   --dry-run              Print actions without changing anything
 
 Examples:
@@ -73,6 +71,18 @@ need git
 need awk
 need grep
 need sed
+
+# Increment minor version for next development cycle (X.Y.Z -> X.(Y+1).0)
+increment_version() {
+  local version="$1"
+  IFS='.' read -ra parts <<< "$version"
+  local major="${parts[0]}"
+  local minor="${parts[1]}"
+  local patch="${parts[2]}"
+  
+  # Increment minor version, reset patch to 0
+  echo "${major}.$((minor + 1)).0"
+}
 
 # Check for GitHub CLI with helpful error message
 if ! command -v gh &> /dev/null; then
